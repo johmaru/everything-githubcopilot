@@ -3,7 +3,13 @@
 #
 # Usage:
 #   .\scripts\setup-project.ps1 C:\path\to\your-project
-#   .\scripts\setup-project.ps1                          # uses current directory
+#   .\scripts\setup-project.ps1                          # targets parent of this repo
+#
+# Typical bootstrap workflow:
+#   cd C:\path\to\your-project
+#   git clone https://github.com/johmaru/everything-githubcopilot.git
+#   cd everything-githubcopilot
+#   .\scripts\setup-project.ps1
 #
 # Copies .github/ Copilot assets and .vscode/settings.json into the target
 # project so VS Code discovers instructions, prompts, agents, hooks, and skills.
@@ -12,7 +18,7 @@ Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
 $RepoRoot = Split-Path -Parent (Split-Path -Parent $PSCommandPath)
-$Target = if ($args.Count -ge 1) { Resolve-Path $args[0] } else { Get-Location }
+$Target = if ($args.Count -ge 1) { Resolve-Path $args[0] } else { Split-Path -Parent $RepoRoot }
 $Target = [string]$Target
 
 if ((Resolve-Path $Target).Path -eq (Resolve-Path $RepoRoot).Path) {
@@ -88,6 +94,35 @@ if (Test-Path $SrcSkill) {
     Write-Host "  Copied  .github/skills/ ($count skills)"
 }
 
+# workflows/ (optional — only if target has no existing workflows)
+$SrcWf = Join-Path $RepoRoot '.github\workflows'
+$DstWf = Join-Path $GithubDir 'workflows'
+if ((Test-Path $SrcWf) -and -not (Test-Path $DstWf)) {
+    Copy-Item $SrcWf $DstWf -Recurse -Force
+    $count = (Get-ChildItem $DstWf -Filter '*.yml' -File).Count
+    Write-Host "  Copied  .github/workflows/ ($count files)"
+} elseif (Test-Path $DstWf) {
+    Write-Host "  Skipped .github/workflows/ (already exists)"
+}
+
+# --- schemas/ (referenced by hooks $schema) ---
+$SrcSchema = Join-Path $RepoRoot 'schemas'
+if (Test-Path $SrcSchema) {
+    $DstSchema = Join-Path $Target 'schemas'
+    New-Item -ItemType Directory -Path $DstSchema -Force | Out-Null
+    Get-ChildItem $SrcSchema -Filter '*.json' -File | Copy-Item -Destination $DstSchema -Force
+    Write-Host "  Copied  schemas/"
+}
+
+# --- scripts/ci/ (validation scripts) ---
+$SrcCi = Join-Path $RepoRoot 'scripts\ci'
+if (Test-Path $SrcCi) {
+    $DstCi = Join-Path (Join-Path $Target 'scripts') 'ci'
+    New-Item -ItemType Directory -Path $DstCi -Force | Out-Null
+    Get-ChildItem $SrcCi -Filter '*.js' -File | Copy-Item -Destination $DstCi -Force
+    Write-Host "  Copied  scripts/ci/"
+}
+
 # --- .vscode/settings.json ---
 $VscodeDir = Join-Path $Target '.vscode'
 New-Item -ItemType Directory -Path $VscodeDir -Force | Out-Null
@@ -107,6 +142,26 @@ $AgentsMd = Join-Path $RepoRoot 'AGENTS.md'
 if (Test-Path $AgentsMd) {
     Copy-Item $AgentsMd (Join-Path $Target 'AGENTS.md') -Force
     Write-Host "  Copied  AGENTS.md"
+}
+
+# --- Install database dependencies ---
+Write-Host ""
+Write-Host "Installing database dependencies (better-sqlite3, sqlite-vec)..."
+$TargetPkg = Join-Path $Target 'package.json'
+if (-not (Test-Path $TargetPkg)) {
+    # Create a minimal package.json so npm install works
+    Set-Content -Path $TargetPkg -Value '{"private":true}' -Encoding UTF8
+    Write-Host "  Created minimal package.json"
+}
+try {
+    Push-Location $Target
+    & npm install --no-audit --no-fund better-sqlite3 sqlite-vec 2>&1 | Out-Null
+    Write-Host "  Installed  better-sqlite3, sqlite-vec"
+} catch {
+    Write-Host "  Warning: Failed to install database dependencies."
+    Write-Host "  Run manually: cd $Target && npm install better-sqlite3 sqlite-vec"
+} finally {
+    Pop-Location
 }
 
 Write-Host ""

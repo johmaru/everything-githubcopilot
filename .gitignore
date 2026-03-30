@@ -96,3 +96,6 @@ temp/
 .opencode/package-lock.json
 .opencode/node_modules/
 assets/images/security/badrudi-exploit.mp4
+
+# detabase files
+.github/sessions*

@@ -37,10 +37,45 @@ function findPackageRoot(startDir) {
 }
 
 /**
+ * Detect the package manager configured for a project directory.
+ * Returns 'yarn', 'pnpm', or 'npm' (default).
+ */
+function detectPackageManager(dir) {
+  try {
+    const pkgPath = path.join(dir, 'package.json');
+    if (fs.existsSync(pkgPath)) {
+      const pkg = JSON.parse(fs.readFileSync(pkgPath, 'utf8'));
+      if (typeof pkg.packageManager === 'string') {
+        if (pkg.packageManager.startsWith('yarn')) return 'yarn';
+        if (pkg.packageManager.startsWith('pnpm')) return 'pnpm';
+      }
+    }
+  } catch {
+    // Ignore parse errors
+  }
+  return 'npm';
+}
+
+/**
+ * Build the install command for the detected package manager.
+ */
+function buildInstallCommand(pm, deps) {
+  switch (pm) {
+    case 'yarn':
+      return `yarn add ${deps}`;
+    case 'pnpm':
+      return `pnpm add ${deps}`;
+    default:
+      return `npm install --no-audit --no-fund ${deps}`;
+  }
+}
+
+/**
  * Ensure required native dependencies (better-sqlite3, sqlite-vec) are installed.
  *
  * Looks for the nearest package.json from the scripts directory and runs
- * `npm install` there. Returns true if deps became available (or already were).
+ * the appropriate package manager install there. Returns true if deps
+ * became available (or already were).
  *
  * Safe to call from hooks — uses a short timeout and never throws.
  */
@@ -55,15 +90,21 @@ function ensureDependencies() {
   // Walk up from this script to find the project root with package.json
   const installDir = findPackageRoot(__dirname) || process.cwd();
   const deps = REQUIRED_DEPS.join(' ');
+  const pm = detectPackageManager(installDir);
+  const cmd = buildInstallCommand(pm, deps);
 
   try {
-    execSync(`npm install --no-audit --no-fund ${deps}`, {
+    execSync(cmd, {
       cwd: installDir,
-      timeout: 30_000,
+      timeout: 60_000,
       stdio: 'pipe',
     });
-  } catch {
-    // Install failed (timeout, network, etc.) — fall back gracefully
+  } catch (err) {
+    // Log to stderr so the user knows why DB features are unavailable
+    process.stderr.write(
+      `[db] Failed to install database dependencies (${pm}): ${err.message || 'unknown error'}\n` +
+      `[db] Run manually: cd ${installDir} && ${cmd}\n`
+    );
     return false;
   }
 

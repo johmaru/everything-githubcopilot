@@ -3,7 +3,13 @@
 #
 # Usage:
 #   ./scripts/setup-project.sh /path/to/your-project
-#   ./scripts/setup-project.sh                          # uses current directory
+#   ./scripts/setup-project.sh                          # targets parent of this repo
+#
+# Typical bootstrap workflow:
+#   cd /path/to/your-project
+#   git clone https://github.com/johmaru/everything-githubcopilot.git
+#   cd everything-githubcopilot
+#   ./scripts/setup-project.sh
 #
 # Copies .github/ Copilot assets and .vscode/settings.json into the target
 # project so VS Code discovers instructions, prompts, agents, hooks, and skills.
@@ -12,7 +18,8 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
-TARGET="${1:-.}"
+DEFAULT_TARGET="$(dirname "$REPO_ROOT")"
+TARGET="${1:-$DEFAULT_TARGET}"
 TARGET="$(cd "$TARGET" 2>/dev/null && pwd)" || { echo "Error: directory '$1' does not exist."; exit 1; }
 
 if [ "$TARGET" = "$REPO_ROOT" ]; then
@@ -72,6 +79,28 @@ if [ -d "$REPO_ROOT/.github/skills" ]; then
   echo "  Copied  .github/skills/ ($(find "$GITHUB_DIR/skills" -mindepth 1 -maxdepth 1 -type d | wc -l | tr -d ' ') skills)"
 fi
 
+# workflows/ (optional — only if target has no existing workflows)
+if [ -d "$REPO_ROOT/.github/workflows" ] && [ ! -d "$GITHUB_DIR/workflows" ]; then
+  cp -r "$REPO_ROOT/.github/workflows" "$GITHUB_DIR/workflows"
+  echo "  Copied  .github/workflows/ ($(find "$GITHUB_DIR/workflows" -name '*.yml' | wc -l | tr -d ' ') files)"
+elif [ -d "$GITHUB_DIR/workflows" ]; then
+  echo "  Skipped .github/workflows/ (already exists)"
+fi
+
+# --- schemas/ (referenced by hooks \$schema) ---
+if [ -d "$REPO_ROOT/schemas" ]; then
+  mkdir -p "$TARGET/schemas"
+  cp "$REPO_ROOT/schemas/"*.json "$TARGET/schemas/" 2>/dev/null || true
+  echo "  Copied  schemas/"
+fi
+
+# --- scripts/ci/ (validation scripts) ---
+if [ -d "$REPO_ROOT/scripts/ci" ]; then
+  mkdir -p "$TARGET/scripts/ci"
+  cp "$REPO_ROOT/scripts/ci/"*.js "$TARGET/scripts/ci/" 2>/dev/null || true
+  echo "  Copied  scripts/ci/"
+fi
+
 # --- .vscode/settings.json ---
 VSCODE_DIR="$TARGET/.vscode"
 mkdir -p "$VSCODE_DIR"
@@ -89,6 +118,20 @@ fi
 if [ -f "$REPO_ROOT/AGENTS.md" ]; then
   cp "$REPO_ROOT/AGENTS.md" "$TARGET/AGENTS.md"
   echo "  Copied  AGENTS.md"
+fi
+
+# --- Install database dependencies ---
+echo ""
+echo "Installing database dependencies (better-sqlite3, sqlite-vec)..."
+if [ ! -f "$TARGET/package.json" ]; then
+  echo '{"private":true}' > "$TARGET/package.json"
+  echo "  Created minimal package.json"
+fi
+if (cd "$TARGET" && npm install --no-audit --no-fund better-sqlite3 sqlite-vec 2>/dev/null); then
+  echo "  Installed  better-sqlite3, sqlite-vec"
+else
+  echo "  Warning: Failed to install database dependencies."
+  echo "  Run manually: cd $TARGET && npm install better-sqlite3 sqlite-vec"
 fi
 
 echo ""

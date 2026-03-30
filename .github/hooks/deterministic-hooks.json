@@ -95,7 +95,7 @@
           {
             "type": "command",
             "command": "node -e \"var s='./scripts/hooks/session-start.js';require('fs').existsSync(s)&&require(s)\"",
-            "timeout": 5
+            "timeout": 60
           }
         ]
       }
