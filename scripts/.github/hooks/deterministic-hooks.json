@@ -87,6 +87,42 @@
           }
         ]
       }
+    ],
+    "SessionStart": [
+      {
+        "description": "Inject prior session summary as additional context for cross-session continuity.",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node -e \"var s='./scripts/hooks/session-start.js';require('fs').existsSync(s)&&require(s)\"",
+            "timeout": 5
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "description": "Persist a session summary so the next session can resume with context.",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node -e \"var s='./scripts/hooks/session-stop.js';require('fs').existsSync(s)&&require(s)\"",
+            "timeout": 10
+          }
+        ]
+      }
+    ],
+    "PreCompact": [
+      {
+        "description": "Snapshot workspace state before context window compaction.",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node -e \"var s='./scripts/hooks/pre-compact.js';require('fs').existsSync(s)&&require(s)\"",
+            "timeout": 10
+          }
+        ]
+      }
     ]
   }
 }
