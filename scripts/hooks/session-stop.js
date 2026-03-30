@@ -81,6 +81,7 @@ if (handle) {
   try {
     db.upsertSession(handle, {
       id: sessionId,
+      startedAt: timestamp,
       endedAt: timestamp,
       summary: summaryText,
       transcriptTail: transcriptTail.slice(-8192), // keep last 8KB in DB
