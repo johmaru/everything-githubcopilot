@@ -13,9 +13,9 @@ const Ajv = require('ajv');
 const ROOT = path.join(__dirname, '../..');
 const HOOKS_DIR = path.join(ROOT, '.github', 'hooks');
 const HOOKS_SCHEMA_PATH = path.join(ROOT, 'schemas', 'hooks.schema.json');
-const ALLOWED_EVENTS = new Set(['PreToolUse', 'PostToolUse', 'PostToolUseFailure', 'Stop']);
+const ALLOWED_EVENTS = new Set(['PreToolUse', 'PostToolUse', 'PostToolUseFailure', 'Stop', 'SessionStart', 'UserPromptSubmit', 'PreCompact', 'SubagentStart', 'SubagentStop']);
 const VALID_HOOK_TYPES = new Set(['command', 'http', 'prompt', 'agent']);
-const EVENTS_WITHOUT_MATCHER = new Set(['Stop']);
+const EVENTS_WITHOUT_MATCHER = new Set(['Stop', 'SessionStart', 'PreCompact', 'SubagentStart', 'SubagentStop']);
 const FORBIDDEN_COMMAND_SNIPPETS = ['${CLAUDE_PLUGIN_ROOT}', 'run-with-flags.js', 'run-with-flags-shell.sh', '~/.claude/'];
 
 function collectJsonFiles(dir) {

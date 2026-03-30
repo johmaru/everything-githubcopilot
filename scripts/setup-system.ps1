@@ -108,6 +108,34 @@ if (Test-Path $SrcHookScripts) {
     Write-Host "  Copied $($scriptFiles.Count) hook scripts to ~/.copilot/scripts/hooks/"
 }
 
+# --- Install native DB dependencies ---
+# better-sqlite3 (session persistence) and sqlite-vec (vector search)
+$PkgJson = Join-Path $CopilotBase 'package.json'
+if (-not (Test-Path $PkgJson)) {
+    @'
+{
+  "name": "copilot-hooks-deps",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Native dependencies for Copilot hook scripts"
+}
+'@ | Set-Content $PkgJson -Encoding UTF8
+    Write-Host "  Created ~/.copilot/package.json"
+}
+
+try {
+    Push-Location $CopilotBase
+    $npmCmd = 'npm install --no-audit --no-fund better-sqlite3 sqlite-vec @huggingface/transformers 2>&1'
+    Write-Host "  Installing native DB dependencies (better-sqlite3, sqlite-vec, @huggingface/transformers)..."
+    $installOutput = Invoke-Expression $npmCmd
+    Write-Host "  Native DB dependencies installed successfully"
+} catch {
+    Write-Host "  Warning: Failed to install native DB dependencies: $($_.Exception.Message)"
+    Write-Host "  You can install them manually: cd ~/.copilot && npm install better-sqlite3 sqlite-vec @huggingface/transformers"
+} finally {
+    Pop-Location
+}
+
 # --- Copy schemas ---
 $CopilotSchemas = Join-Path $CopilotBase 'schemas'
 New-Item -ItemType Directory -Path $CopilotSchemas -Force | Out-Null

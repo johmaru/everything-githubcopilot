@@ -72,6 +72,14 @@ private/
 # Session templates (not committed)
 examples/sessions/*.tmp
 
+# Session SQLite databases
+.github/sessions/copilot.db
+.github/sessions/copilot.db-wal
+.github/sessions/copilot.db-shm
+
+# Model cache (embedding ONNX models)
+.github/sessions/.model-cache/
+
 # Local drafts
 marketing/
 .dmux/

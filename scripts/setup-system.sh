@@ -126,6 +126,29 @@ if [ -d "$SRC_HOOK_SCRIPTS" ]; then
   echo "  Copied $count hook scripts to ~/.copilot/scripts/hooks/"
 fi
 
+# --- Install native DB dependencies ---
+# better-sqlite3 (session persistence) and sqlite-vec (vector search)
+PKG_JSON="$COPILOT_BASE/package.json"
+if [ ! -f "$PKG_JSON" ]; then
+  cat > "$PKG_JSON" << 'PKGJSON'
+{
+  "name": "copilot-hooks-deps",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Native dependencies for Copilot hook scripts"
+}
+PKGJSON
+  echo "  Created ~/.copilot/package.json"
+fi
+
+echo "  Installing native DB dependencies (better-sqlite3, sqlite-vec, @huggingface/transformers)..."
+if (cd "$COPILOT_BASE" && npm install --no-audit --no-fund better-sqlite3 sqlite-vec @huggingface/transformers 2>&1); then
+  echo "  Native DB dependencies installed successfully"
+else
+  echo "  Warning: Failed to install native DB dependencies."
+  echo "  You can install them manually: cd ~/.copilot && npm install better-sqlite3 sqlite-vec @huggingface/transformers"
+fi
+
 # --- Copy schemas ---
 COPILOT_SCHEMAS="$COPILOT_BASE/schemas"
 mkdir -p "$COPILOT_SCHEMAS"

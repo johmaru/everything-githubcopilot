@@ -55,10 +55,15 @@
     "postinstall": "echo '\n  Everything GitHub Copilot installed.\n  Active customizations live under .github/.\n  Validate with: npm run validate\n  Docs: README.md and docs/migration-status.md\n'",
     "lint": "eslint . && markdownlint '**/*.md' --ignore node_modules",
     "validate": "node scripts/ci/validate-github-hooks.js && node scripts/ci/validate-copilot-customizations.js && node scripts/ci/validate-no-personal-paths.js",
-    "test": "npm run validate"
+    "test:ci": "node tests/ci/validators.test.js",
+    "test:hooks": "node tests/hooks/db.test.js",
+    "test": "npm run validate && npm run test:ci && npm run test:hooks"
   },
   "dependencies": {
-    "ajv": "^8.18.0"
+    "@huggingface/transformers": "^3.8.1",
+    "ajv": "^8.18.0",
+    "better-sqlite3": "^12.8.0",
+    "sqlite-vec": "^0.1.8"
   },
   "devDependencies": {
     "@eslint/js": "^9.39.2",

@@ -405,6 +405,70 @@ function runTests() {
     cleanupTestDir(testDir);
   })) passed++; else failed++;
 
+  if (test('accepts SessionStart hook without matcher', () => {
+    const testDir = createTestDir();
+    writeJson(path.join(testDir, 'schemas', 'hooks.schema.json'), {
+      type: 'object',
+      required: ['hooks'],
+      properties: { hooks: { type: 'object' } },
+      additionalProperties: true,
+    });
+    writeJson(path.join(testDir, '.github', 'hooks', 'lifecycle.json'), {
+      hooks: {
+        SessionStart: [
+          {
+            description: 'Inject prior session context',
+            hooks: [{ type: 'command', command: 'echo ok' }],
+          },
+        ],
+      },
+    });
+
+    const result = runValidatorWithDirs('validate-github-hooks', {
+      ROOT: testDir,
+      HOOKS_DIR: path.join(testDir, '.github', 'hooks'),
+      HOOKS_SCHEMA_PATH: path.join(testDir, 'schemas', 'hooks.schema.json'),
+    });
+
+    assert.strictEqual(result.code, 0, 'SessionStart should pass without matcher');
+    cleanupTestDir(testDir);
+  })) passed++; else failed++;
+
+  if (test('accepts Stop and PreCompact hooks without matcher', () => {
+    const testDir = createTestDir();
+    writeJson(path.join(testDir, 'schemas', 'hooks.schema.json'), {
+      type: 'object',
+      required: ['hooks'],
+      properties: { hooks: { type: 'object' } },
+      additionalProperties: true,
+    });
+    writeJson(path.join(testDir, '.github', 'hooks', 'lifecycle.json'), {
+      hooks: {
+        Stop: [
+          {
+            description: 'Save session summary',
+            hooks: [{ type: 'command', command: 'echo stop' }],
+          },
+        ],
+        PreCompact: [
+          {
+            description: 'Snapshot state before compaction',
+            hooks: [{ type: 'command', command: 'echo compact' }],
+          },
+        ],
+      },
+    });
+
+    const result = runValidatorWithDirs('validate-github-hooks', {
+      ROOT: testDir,
+      HOOKS_DIR: path.join(testDir, '.github', 'hooks'),
+      HOOKS_SCHEMA_PATH: path.join(testDir, 'schemas', 'hooks.schema.json'),
+    });
+
+    assert.strictEqual(result.code, 0, 'Stop and PreCompact should pass without matcher');
+    cleanupTestDir(testDir);
+  })) passed++; else failed++;
+
   // ==========================================
   // catalog.js
   // ==========================================
