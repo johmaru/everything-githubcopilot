@@ -178,7 +178,8 @@ function migrate(db) {
       ended_at TEXT,
       branch TEXT,
       summary TEXT,
-      transcript_tail TEXT
+      transcript_tail TEXT,
+      project_id TEXT
     );
 
     CREATE TABLE IF NOT EXISTS session_files (
@@ -202,7 +203,20 @@ function migrate(db) {
       kind TEXT NOT NULL DEFAULT 'pattern',
       content TEXT NOT NULL,
       created_at TEXT NOT NULL,
-      session_id TEXT
+      session_id TEXT,
+      project_id TEXT,
+      confidence REAL NOT NULL DEFAULT 0.5
+    );
+
+    CREATE TABLE IF NOT EXISTS observations (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      session_id TEXT,
+      project_id TEXT,
+      tool_name TEXT NOT NULL,
+      tool_input TEXT,
+      tool_output TEXT,
+      event_type TEXT NOT NULL DEFAULT 'tool_complete',
+      created_at TEXT NOT NULL
     );
 
     CREATE INDEX IF NOT EXISTS idx_sessions_started
@@ -216,6 +230,29 @@ function migrate(db) {
 
     CREATE INDEX IF NOT EXISTS idx_knowledge_kind
       ON knowledge(kind, created_at DESC);
+
+    CREATE INDEX IF NOT EXISTS idx_observations_session
+      ON observations(session_id, created_at DESC);
+  `);
+
+  // Add columns to existing tables BEFORE creating indexes that reference them.
+  // Safe: "duplicate column name" is silently ignored.
+  const alterQueries = [
+    'ALTER TABLE sessions ADD COLUMN project_id TEXT',
+    'ALTER TABLE knowledge ADD COLUMN project_id TEXT',
+    'ALTER TABLE knowledge ADD COLUMN confidence REAL NOT NULL DEFAULT 0.5',
+  ];
+  for (const q of alterQueries) {
+    try { db.exec(q); } catch { /* column already exists */ }
+  }
+
+  // Indexes on the newly-added columns (must run after ALTER TABLE)
+  db.exec(`
+    CREATE INDEX IF NOT EXISTS idx_knowledge_project
+      ON knowledge(project_id, kind);
+
+    CREATE INDEX IF NOT EXISTS idx_observations_project
+      ON observations(project_id, created_at DESC);
   `);
 
   // Create virtual vector table (gracefully skips if sqlite-vec not loaded)
@@ -236,18 +273,19 @@ function migrate(db) {
 /**
  * Upsert a session record.
  */
-function upsertSession(db, { id, startedAt, endedAt, branch, summary, transcriptTail }) {
+function upsertSession(db, { id, startedAt, endedAt, branch, summary, transcriptTail, projectId }) {
   const stmt = db.prepare(`
-    INSERT INTO sessions (id, started_at, ended_at, branch, summary, transcript_tail)
-    VALUES (?, ?, ?, ?, ?, ?)
+    INSERT INTO sessions (id, started_at, ended_at, branch, summary, transcript_tail, project_id)
+    VALUES (?, ?, ?, ?, ?, ?, ?)
     ON CONFLICT(id) DO UPDATE SET
       ended_at = COALESCE(excluded.ended_at, sessions.ended_at),
       branch = COALESCE(excluded.branch, sessions.branch),
       summary = COALESCE(excluded.summary, sessions.summary),
-      transcript_tail = COALESCE(excluded.transcript_tail, sessions.transcript_tail)
+      transcript_tail = COALESCE(excluded.transcript_tail, sessions.transcript_tail),
+      project_id = COALESCE(excluded.project_id, sessions.project_id)
   `);
 
-  stmt.run(id, startedAt, endedAt || null, branch || null, summary || null, transcriptTail || null);
+  stmt.run(id, startedAt, endedAt || null, branch || null, summary || null, transcriptTail || null, projectId || null);
 }
 
 /**
@@ -323,13 +361,16 @@ function isVecAvailable() {
  * Insert a knowledge entry with its embedding vector.
  * Returns the inserted row id.
  */
-function insertKnowledge(db, { source, kind, content, createdAt, sessionId, embedding }) {
+function insertKnowledge(db, { source, kind, content, createdAt, sessionId, embedding, projectId, confidence }) {
   const stmt = db.prepare(`
-    INSERT INTO knowledge (source, kind, content, created_at, session_id)
-    VALUES (?, ?, ?, ?, ?)
+    INSERT INTO knowledge (source, kind, content, created_at, session_id, project_id, confidence)
+    VALUES (?, ?, ?, ?, ?, ?, ?)
   `);
 
-  const result = stmt.run(source, kind || 'pattern', content, createdAt, sessionId || null);
+  const result = stmt.run(
+    source, kind || 'pattern', content, createdAt, sessionId || null,
+    projectId || null, typeof confidence === 'number' ? confidence : 0.5
+  );
   const rowId = result.lastInsertRowid;
 
   // Insert vector if embedding was provided (gracefully skips if sqlite-vec not loaded)
@@ -389,13 +430,201 @@ function searchKnowledgeByKeyword(db, keyword, limit = 10) {
  */
 function getAllKnowledge(db, limit = 100) {
   const stmt = db.prepare(`
-    SELECT id, source, kind, content, created_at, session_id
+    SELECT id, source, kind, content, created_at, session_id, project_id, confidence
     FROM knowledge
     ORDER BY created_at DESC
     LIMIT ?
   `);
 
   return stmt.all(limit);
+}
+
+/**
+ * Get knowledge entries filtered by project and minimum confidence.
+ * Falls back to cross-project results when project-specific results are sparse.
+ */
+function getProjectKnowledge(db, { projectId, minConfidence = 0.4, limit = 10 } = {}) {
+  if (projectId && projectId !== 'local') {
+    const stmt = db.prepare(`
+      SELECT id, source, kind, content, created_at, session_id, project_id, confidence
+      FROM knowledge
+      WHERE project_id = ? AND confidence >= ?
+      ORDER BY confidence DESC, created_at DESC
+      LIMIT ?
+    `);
+    const rows = stmt.all(projectId, minConfidence, limit);
+    if (rows.length >= 3) {
+      return rows;
+    }
+  }
+
+  // Fallback: cross-project, confidence-filtered
+  const fallback = db.prepare(`
+    SELECT id, source, kind, content, created_at, session_id, project_id, confidence
+    FROM knowledge
+    WHERE confidence >= ?
+    ORDER BY confidence DESC, created_at DESC
+    LIMIT ?
+  `);
+  return fallback.all(minConfidence, limit);
+}
+
+/**
+ * Search knowledge by multiple keywords (OR match).
+ * Returns deduplicated entries that match any of the provided keywords.
+ */
+function searchKnowledgeByKeywords(db, keywords, { projectId, limit = 10 } = {}) {
+  if (!keywords || keywords.length === 0) {
+    return [];
+  }
+
+  // Build WHERE clause: (content LIKE ? OR content LIKE ? ...)
+  const likeClauses = keywords.map(() => 'content LIKE ?');
+  const projectFilter = (projectId && projectId !== 'local')
+    ? 'AND (project_id = ? OR project_id IS NULL)'
+    : '';
+
+  const sql = `
+    SELECT DISTINCT id, source, kind, content, created_at, session_id, project_id, confidence
+    FROM knowledge
+    WHERE (${likeClauses.join(' OR ')}) ${projectFilter}
+    ORDER BY confidence DESC, created_at DESC
+    LIMIT ?
+  `;
+
+  const params = keywords.map((kw) => `%${kw}%`);
+  if (projectId && projectId !== 'local') {
+    params.push(projectId);
+  }
+  params.push(limit);
+
+  return db.prepare(sql).all(...params);
+}
+
+/**
+ * Get recent sessions filtered by project.
+ */
+function getRecentProjectSessions(db, { projectId, limit = 3 } = {}) {
+  if (projectId && projectId !== 'local') {
+    const stmt = db.prepare(`
+      SELECT id, started_at, ended_at, branch, summary, project_id
+      FROM sessions
+      WHERE summary IS NOT NULL AND summary != ''
+        AND project_id = ?
+      ORDER BY started_at DESC
+      LIMIT ?
+    `);
+    const rows = stmt.all(projectId, limit);
+    if (rows.length > 0) {
+      return rows;
+    }
+  }
+
+  // Fallback: any project
+  return getRecentSessions(db, limit);
+}
+
+// ---------------------------------------------------------------------------
+// Observation helpers
+// ---------------------------------------------------------------------------
+
+/**
+ * Insert a tool-use observation record.
+ */
+function insertObservation(db, { sessionId, projectId, toolName, toolInput, toolOutput, eventType, createdAt }) {
+  const stmt = db.prepare(`
+    INSERT INTO observations (session_id, project_id, tool_name, tool_input, tool_output, event_type, created_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?)
+  `);
+
+  const result = stmt.run(
+    sessionId || null,
+    projectId || null,
+    toolName,
+    typeof toolInput === 'string' ? toolInput.slice(0, 5000) : JSON.stringify(toolInput || '').slice(0, 5000),
+    typeof toolOutput === 'string' ? toolOutput.slice(0, 5000) : JSON.stringify(toolOutput || '').slice(0, 5000),
+    eventType || 'tool_complete',
+    createdAt || new Date().toISOString()
+  );
+
+  return Number(result.lastInsertRowid);
+}
+
+/**
+ * Fetch observations for a specific session.
+ */
+function getSessionObservations(db, sessionId, limit = 200) {
+  const stmt = db.prepare(`
+    SELECT id, session_id, project_id, tool_name, tool_input, tool_output, event_type, created_at
+    FROM observations
+    WHERE session_id = ?
+    ORDER BY created_at ASC
+    LIMIT ?
+  `);
+
+  return stmt.all(sessionId, limit);
+}
+
+/**
+ * Count observations for a session (cheap check before analysis).
+ */
+function countSessionObservations(db, sessionId) {
+  const stmt = db.prepare('SELECT COUNT(*) AS cnt FROM observations WHERE session_id = ?');
+  return stmt.get(sessionId).cnt;
+}
+
+/**
+ * Delete observations older than the given number of days.
+ */
+function pruneOldObservations(db, days = 30) {
+  const cutoff = new Date(Date.now() - days * 86400000).toISOString();
+  const stmt = db.prepare('DELETE FROM observations WHERE created_at < ?');
+  return stmt.run(cutoff).changes;
+}
+
+// ---------------------------------------------------------------------------
+// Project detection helper
+// ---------------------------------------------------------------------------
+
+/**
+ * Derive a project ID from the current working directory's git remote or path.
+ * Returns a 12-char hex hash (compatible with CLv2) or 'local'.
+ */
+function detectProjectId(cwd) {
+  const crypto = require('crypto');
+  const { execSync } = require('child_process');
+
+  let hashSource = '';
+
+  try {
+    hashSource = execSync('git remote get-url origin', {
+      cwd: cwd || process.cwd(),
+      timeout: 5000,
+      encoding: 'utf8',
+      stdio: ['pipe', 'pipe', 'pipe'],
+    }).trim();
+  } catch {
+    // Not a git repo or no remote
+  }
+
+  if (!hashSource) {
+    try {
+      hashSource = execSync('git rev-parse --show-toplevel', {
+        cwd: cwd || process.cwd(),
+        timeout: 5000,
+        encoding: 'utf8',
+        stdio: ['pipe', 'pipe', 'pipe'],
+      }).trim();
+    } catch {
+      return 'local';
+    }
+  }
+
+  if (!hashSource) {
+    return 'local';
+  }
+
+  return crypto.createHash('sha256').update(hashSource).digest('hex').slice(0, 12);
 }
 
 // ---------------------------------------------------------------------------
@@ -431,18 +660,26 @@ function close() {
 module.exports = {
   blobToVec,
   close,
+  countSessionObservations,
+  detectProjectId,
   ensureDependencies,
   getAllKnowledge,
+  getProjectKnowledge,
+  getRecentProjectSessions,
   getRecentSessions,
   getPendingTasks,
+  getSessionObservations,
   insertKnowledge,
+  insertObservation,
   insertPendingTask,
   insertSessionFiles,
   isAvailable,
   isVecAvailable,
   open,
+  pruneOldObservations,
   searchKnowledge,
   searchKnowledgeByKeyword,
+  searchKnowledgeByKeywords,
   upsertSession,
   vecToBlob,
   DB_PATH,

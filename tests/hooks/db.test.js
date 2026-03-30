@@ -35,7 +35,8 @@ const SCHEMA_SQL = `
     ended_at TEXT,
     branch TEXT,
     summary TEXT,
-    transcript_tail TEXT
+    transcript_tail TEXT,
+    project_id TEXT
   );
 
   CREATE TABLE IF NOT EXISTS session_files (
@@ -59,7 +60,20 @@ const SCHEMA_SQL = `
     kind TEXT NOT NULL DEFAULT 'pattern',
     content TEXT NOT NULL,
     created_at TEXT NOT NULL,
-    session_id TEXT
+    session_id TEXT,
+    project_id TEXT,
+    confidence REAL NOT NULL DEFAULT 0.5
+  );
+
+  CREATE TABLE IF NOT EXISTS observations (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    session_id TEXT,
+    project_id TEXT,
+    tool_name TEXT NOT NULL,
+    tool_input TEXT,
+    tool_output TEXT,
+    event_type TEXT NOT NULL DEFAULT 'tool_complete',
+    created_at TEXT NOT NULL
   );
 
   CREATE INDEX IF NOT EXISTS idx_sessions_started
@@ -73,6 +87,15 @@ const SCHEMA_SQL = `
 
   CREATE INDEX IF NOT EXISTS idx_knowledge_kind
     ON knowledge(kind, created_at DESC);
+
+  CREATE INDEX IF NOT EXISTS idx_observations_session
+    ON observations(session_id, created_at DESC);
+
+  CREATE INDEX IF NOT EXISTS idx_knowledge_project
+    ON knowledge(project_id, kind);
+
+  CREATE INDEX IF NOT EXISTS idx_observations_project
+    ON observations(project_id, created_at DESC);
 `;
 
 /**
@@ -353,6 +376,9 @@ results.push(
     assert.ok(indexNames.includes('idx_pending_status'), 'idx_pending_status should exist');
     assert.ok(indexNames.includes('idx_session_files_session'), 'idx_session_files_session should exist');
     assert.ok(indexNames.includes('idx_knowledge_kind'), 'idx_knowledge_kind should exist');
+    assert.ok(indexNames.includes('idx_observations_session'), 'idx_observations_session should exist');
+    assert.ok(indexNames.includes('idx_knowledge_project'), 'idx_knowledge_project should exist');
+    assert.ok(indexNames.includes('idx_observations_project'), 'idx_observations_project should exist');
 
     // Verify index targets
     const byName = Object.fromEntries(indexes.map((i) => [i.name, i.tbl_name]));
@@ -360,6 +386,9 @@ results.push(
     assert.strictEqual(byName['idx_pending_status'], 'pending_tasks');
     assert.strictEqual(byName['idx_session_files_session'], 'session_files');
     assert.strictEqual(byName['idx_knowledge_kind'], 'knowledge');
+    assert.strictEqual(byName['idx_observations_session'], 'observations');
+    assert.strictEqual(byName['idx_knowledge_project'], 'knowledge');
+    assert.strictEqual(byName['idx_observations_project'], 'observations');
     handle.close();
   })
 );
@@ -514,6 +543,330 @@ results.push(
 results.push(
   test('EMBEDDING_DIM is exported as 384', () => {
     assert.strictEqual(db.EMBEDDING_DIM, 384);
+  })
+);
+
+// ---------------------------------------------------------------------------
+// Phase 4: Observation + project ID tests
+// ---------------------------------------------------------------------------
+console.log('\nPhase 4: observations + project ID tests');
+
+// 16. insertObservation inserts a record
+results.push(
+  test('insertObservation inserts an observation record', () => {
+    const handle = createPlainTestDb();
+
+    const id = db.insertObservation(handle, {
+      sessionId: 'sess-obs-1',
+      projectId: 'abc123def456',
+      toolName: 'read_file',
+      toolInput: '{"path": "/src/index.ts"}',
+      toolOutput: 'file contents here',
+      eventType: 'tool_complete',
+      createdAt: '2026-04-01T10:00:00Z',
+    });
+
+    assert.ok(typeof id === 'number', 'should return numeric id');
+    assert.ok(id > 0, 'id should be positive');
+
+    const row = handle.prepare('SELECT * FROM observations WHERE id = ?').get(id);
+    assert.ok(row, 'observation row should exist');
+    assert.strictEqual(row.session_id, 'sess-obs-1');
+    assert.strictEqual(row.project_id, 'abc123def456');
+    assert.strictEqual(row.tool_name, 'read_file');
+    assert.strictEqual(row.event_type, 'tool_complete');
+    handle.close();
+  })
+);
+
+// 17. insertObservation truncates long input/output to 5000 chars
+results.push(
+  test('insertObservation truncates long tool_input and tool_output to 5000 chars', () => {
+    const handle = createPlainTestDb();
+
+    const longStr = 'x'.repeat(6000);
+    db.insertObservation(handle, {
+      toolName: 'edit_file',
+      toolInput: longStr,
+      toolOutput: longStr,
+      createdAt: '2026-04-01T10:01:00Z',
+    });
+
+    const row = handle.prepare('SELECT tool_input, tool_output FROM observations WHERE id = 1').get();
+    assert.strictEqual(row.tool_input.length, 5000, 'tool_input should be truncated');
+    assert.strictEqual(row.tool_output.length, 5000, 'tool_output should be truncated');
+    handle.close();
+  })
+);
+
+// 18. getSessionObservations returns observations for a session ordered by created_at ASC
+results.push(
+  test('getSessionObservations returns observations ordered by created_at ASC', () => {
+    const handle = createPlainTestDb();
+
+    db.insertObservation(handle, {
+      sessionId: 'sess-obs-2',
+      toolName: 'read_file',
+      createdAt: '2026-04-01T10:02:00Z',
+    });
+    db.insertObservation(handle, {
+      sessionId: 'sess-obs-2',
+      toolName: 'edit_file',
+      createdAt: '2026-04-01T10:03:00Z',
+    });
+    db.insertObservation(handle, {
+      sessionId: 'sess-obs-other',
+      toolName: 'run_terminal',
+      createdAt: '2026-04-01T10:04:00Z',
+    });
+
+    const obs = db.getSessionObservations(handle, 'sess-obs-2');
+    assert.strictEqual(obs.length, 2, 'should return 2 observations for session');
+    assert.strictEqual(obs[0].tool_name, 'read_file', 'first by time');
+    assert.strictEqual(obs[1].tool_name, 'edit_file', 'second by time');
+    handle.close();
+  })
+);
+
+// 19. countSessionObservations returns correct count
+results.push(
+  test('countSessionObservations returns correct count', () => {
+    const handle = createPlainTestDb();
+
+    db.insertObservation(handle, { sessionId: 'sess-cnt', toolName: 'a', createdAt: '2026-04-01T10:00:00Z' });
+    db.insertObservation(handle, { sessionId: 'sess-cnt', toolName: 'b', createdAt: '2026-04-01T10:01:00Z' });
+    db.insertObservation(handle, { sessionId: 'sess-cnt', toolName: 'c', createdAt: '2026-04-01T10:02:00Z' });
+    db.insertObservation(handle, { sessionId: 'sess-other', toolName: 'd', createdAt: '2026-04-01T10:03:00Z' });
+
+    assert.strictEqual(db.countSessionObservations(handle, 'sess-cnt'), 3);
+    assert.strictEqual(db.countSessionObservations(handle, 'sess-other'), 1);
+    assert.strictEqual(db.countSessionObservations(handle, 'sess-none'), 0);
+    handle.close();
+  })
+);
+
+// 20. pruneOldObservations deletes old records
+results.push(
+  test('pruneOldObservations deletes observations older than N days', () => {
+    const handle = createPlainTestDb();
+
+    const old = new Date(Date.now() - 40 * 86400000).toISOString();      // 40 days ago
+    const recent = new Date(Date.now() - 10 * 86400000).toISOString();   // 10 days ago
+
+    db.insertObservation(handle, { sessionId: 's1', toolName: 'old1', createdAt: old });
+    db.insertObservation(handle, { sessionId: 's1', toolName: 'old2', createdAt: old });
+    db.insertObservation(handle, { sessionId: 's1', toolName: 'recent1', createdAt: recent });
+
+    const deleted = db.pruneOldObservations(handle, 30);
+    assert.strictEqual(deleted, 2, 'should delete 2 old observations');
+
+    const remaining = handle.prepare('SELECT COUNT(*) AS cnt FROM observations').get();
+    assert.strictEqual(remaining.cnt, 1, 'should have 1 remaining');
+    handle.close();
+  })
+);
+
+// 21. detectProjectId returns 12-char hex or 'local'
+results.push(
+  test('detectProjectId returns a string (12-char hex or local)', () => {
+    const pid = db.detectProjectId(process.cwd());
+    assert.ok(typeof pid === 'string', 'should return a string');
+    assert.ok(pid.length > 0, 'should not be empty');
+
+    if (pid !== 'local') {
+      assert.strictEqual(pid.length, 12, 'hash should be 12 chars');
+      assert.ok(/^[0-9a-f]{12}$/.test(pid), 'should be hex');
+    }
+  })
+);
+
+// 22. insertKnowledge with projectId and confidence
+results.push(
+  test('insertKnowledge stores projectId and confidence', () => {
+    const handle = createPlainTestDb();
+
+    const id = db.insertKnowledge(handle, {
+      source: 'auto',
+      kind: 'workflow',
+      content: 'Common pattern: read_file → edit_file → run_terminal',
+      createdAt: '2026-04-01T11:00:00Z',
+      projectId: 'abc123def456',
+      confidence: 0.7,
+    });
+
+    const row = handle.prepare('SELECT * FROM knowledge WHERE id = ?').get(id);
+    assert.ok(row);
+    assert.strictEqual(row.project_id, 'abc123def456');
+    assert.strictEqual(row.confidence, 0.7);
+    handle.close();
+  })
+);
+
+// 23. insertKnowledge defaults confidence to 0.5 when omitted
+results.push(
+  test('insertKnowledge defaults confidence to 0.5 when omitted', () => {
+    const handle = createPlainTestDb();
+
+    const id = db.insertKnowledge(handle, {
+      source: 'session',
+      kind: 'pattern',
+      content: 'Some knowledge',
+      createdAt: '2026-04-01T12:00:00Z',
+    });
+
+    const row = handle.prepare('SELECT confidence FROM knowledge WHERE id = ?').get(id);
+    assert.strictEqual(row.confidence, 0.5);
+    handle.close();
+  })
+);
+
+// 24. upsertSession with projectId
+results.push(
+  test('upsertSession stores projectId', () => {
+    const handle = createPlainTestDb();
+
+    db.upsertSession(handle, {
+      id: 'sess-proj',
+      startedAt: '2026-04-01T13:00:00Z',
+      projectId: 'def456abc789',
+    });
+
+    const row = handle.prepare('SELECT project_id FROM sessions WHERE id = ?').get('sess-proj');
+    assert.strictEqual(row.project_id, 'def456abc789');
+    handle.close();
+  })
+);
+
+// 25. getAllKnowledge returns project_id and confidence columns
+results.push(
+  test('getAllKnowledge returns project_id and confidence columns', () => {
+    const handle = createPlainTestDb();
+
+    db.insertKnowledge(handle, {
+      source: 'auto',
+      kind: 'hotspot',
+      content: 'src/index.ts edited 5 times',
+      createdAt: '2026-04-01T14:00:00Z',
+      projectId: 'projX',
+      confidence: 0.3,
+    });
+
+    const all = db.getAllKnowledge(handle, 1);
+    assert.strictEqual(all.length, 1);
+    assert.strictEqual(all[0].project_id, 'projX');
+    assert.strictEqual(all[0].confidence, 0.3);
+    handle.close();
+  })
+);
+
+// ---------------------------------------------------------------------------
+// Phase 5: Smart filtering tests
+// ---------------------------------------------------------------------------
+console.log('\nPhase 5: smart filtering tests');
+
+// Helper: seed knowledge entries for filtering tests
+function seedFilteringData(handle) {
+  // Project A knowledge — varying confidence
+  db.insertKnowledge(handle, { source: 'auto', kind: 'workflow', content: 'Always run tests before push', createdAt: '2026-04-01T10:00:00Z', projectId: 'projAAA', confidence: 0.8 });
+  db.insertKnowledge(handle, { source: 'auto', kind: 'hotspot', content: 'src/main.ts is a hotspot', createdAt: '2026-04-01T10:01:00Z', projectId: 'projAAA', confidence: 0.3 });
+  db.insertKnowledge(handle, { source: 'auto', kind: 'error_resolution', content: 'Fix ENOENT by checking path', createdAt: '2026-04-01T10:02:00Z', projectId: 'projAAA', confidence: 0.6 });
+  db.insertKnowledge(handle, { source: 'auto', kind: 'pattern', content: 'Use async await over callbacks', createdAt: '2026-04-01T10:02:30Z', projectId: 'projAAA', confidence: 0.5 });
+  // Project B knowledge
+  db.insertKnowledge(handle, { source: 'auto', kind: 'workflow', content: 'Use docker compose for dev', createdAt: '2026-04-01T10:03:00Z', projectId: 'projBBB', confidence: 0.7 });
+  // No project knowledge (global)
+  db.insertKnowledge(handle, { source: 'session', kind: 'pattern', content: 'Prefer immutable patterns', createdAt: '2026-04-01T10:04:00Z', confidence: 0.9 });
+  // Low confidence
+  db.insertKnowledge(handle, { source: 'auto', kind: 'hotspot', content: 'README.md edited 3 times', createdAt: '2026-04-01T10:05:00Z', projectId: 'projAAA', confidence: 0.2 });
+}
+
+// 26. getProjectKnowledge filters by project and confidence
+results.push(
+  test('getProjectKnowledge returns project-specific entries above minConfidence', () => {
+    const handle = createPlainTestDb();
+    seedFilteringData(handle);
+
+    const results26 = db.getProjectKnowledge(handle, { projectId: 'projAAA', minConfidence: 0.4, limit: 10 });
+    // Should include: confidence 0.8, 0.6, 0.5 from projAAA (not 0.3 or 0.2)
+    assert.ok(results26.length >= 3, 'should have at least 3');
+    assert.ok(results26.every((r) => r.confidence >= 0.4), 'all above minConfidence');
+    assert.ok(results26.every((r) => r.project_id === 'projAAA'), 'all from projAAA');
+    handle.close();
+  })
+);
+
+// 27. getProjectKnowledge falls back to cross-project when sparse
+results.push(
+  test('getProjectKnowledge falls back to cross-project when fewer than 3 project matches', () => {
+    const handle = createPlainTestDb();
+    seedFilteringData(handle);
+
+    // projBBB only has 1 entry above 0.4 → fallback to cross-project
+    const results27 = db.getProjectKnowledge(handle, { projectId: 'projBBB', minConfidence: 0.4, limit: 5 });
+    assert.ok(results27.length >= 2, 'should return cross-project fallback');
+    // Should include entries from other projects too
+    const projects = new Set(results27.map((r) => r.project_id));
+    assert.ok(projects.size > 1 || results27.some((r) => r.project_id !== 'projBBB'),
+      'should include entries beyond projBBB');
+    handle.close();
+  })
+);
+
+// 28. searchKnowledgeByKeywords matches multiple keywords with OR
+results.push(
+  test('searchKnowledgeByKeywords matches any of the provided keywords', () => {
+    const handle = createPlainTestDb();
+    seedFilteringData(handle);
+
+    const results28 = db.searchKnowledgeByKeywords(handle, ['docker', 'ENOENT'], { limit: 10 });
+    assert.strictEqual(results28.length, 2, 'should match 2 entries');
+    const contents = results28.map((r) => r.content);
+    assert.ok(contents.some((c) => c.includes('docker')), 'should include docker entry');
+    assert.ok(contents.some((c) => c.includes('ENOENT')), 'should include ENOENT entry');
+    handle.close();
+  })
+);
+
+// 29. searchKnowledgeByKeywords with projectId scoping
+results.push(
+  test('searchKnowledgeByKeywords scopes to project when projectId provided', () => {
+    const handle = createPlainTestDb();
+    seedFilteringData(handle);
+
+    // "tests" matches projAAA entry, "docker" matches projBBB
+    const results29 = db.searchKnowledgeByKeywords(handle, ['tests', 'docker'], { projectId: 'projAAA', limit: 10 });
+    // Should include projAAA "tests" match and also null project_id matches
+    // Should NOT include projBBB "docker" entry
+    assert.ok(results29.every((r) => r.project_id === 'projAAA' || r.project_id === null),
+      'should only include projAAA or global entries');
+    handle.close();
+  })
+);
+
+// 30. getRecentProjectSessions filters by project
+results.push(
+  test('getRecentProjectSessions returns project-specific sessions first', () => {
+    const handle = createPlainTestDb();
+
+    db.upsertSession(handle, { id: 's-a1', startedAt: '2026-04-01T10:00:00Z', summary: 'Session A1', projectId: 'projAAA' });
+    db.upsertSession(handle, { id: 's-b1', startedAt: '2026-04-01T11:00:00Z', summary: 'Session B1', projectId: 'projBBB' });
+    db.upsertSession(handle, { id: 's-a2', startedAt: '2026-04-01T12:00:00Z', summary: 'Session A2', projectId: 'projAAA' });
+
+    const results30 = db.getRecentProjectSessions(handle, { projectId: 'projAAA', limit: 3 });
+    assert.ok(results30.every((r) => r.project_id === 'projAAA'), 'should only return projAAA sessions');
+    assert.strictEqual(results30[0].summary, 'Session A2', 'most recent first');
+    handle.close();
+  })
+);
+
+// 31. searchKnowledgeByKeywords with empty keywords returns empty
+results.push(
+  test('searchKnowledgeByKeywords returns empty for empty keywords array', () => {
+    const handle = createPlainTestDb();
+    seedFilteringData(handle);
+
+    const results31 = db.searchKnowledgeByKeywords(handle, [], { limit: 10 });
+    assert.strictEqual(results31.length, 0);
+    handle.close();
   })
 );
 

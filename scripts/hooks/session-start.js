@@ -11,15 +11,26 @@
  * Output (stdout JSON): { hookSpecificOutput: { additionalContext: "..." } }
  */
 
+const fs = require('fs');
 const path = require('path');
+const crypto = require('crypto');
 const { emit, getContext, fileExists, readFile } = require('./_shared');
 const db = require('./db');
 
 const SESSIONS_DIR = path.join(process.cwd(), '.github', 'sessions');
 const SUMMARY_FILE = path.join(SESSIONS_DIR, 'latest-summary.md');
+const SESSION_ID_FILE = path.join(SESSIONS_DIR, '.current-session-id');
 
 const context = getContext();
-const sessionId = context.payload && context.payload.sessionId;
+
+// Resolve session ID: payload > generate UUID, then persist for session-stop
+const sessionId = (context.payload && context.payload.sessionId) || crypto.randomUUID();
+try {
+  fs.mkdirSync(SESSIONS_DIR, { recursive: true });
+  fs.writeFileSync(SESSION_ID_FILE, sessionId, 'utf8');
+} catch {
+  // non-fatal — session-stop will generate its own UUID if needed
+}
 
 const parts = [];
 
@@ -30,16 +41,17 @@ db.ensureDependencies();
 const handle = db.open();
 
 if (handle) {
-  // Register this session
-  if (sessionId) {
-    db.upsertSession(handle, {
-      id: sessionId,
-      startedAt: new Date().toISOString(),
-    });
-  }
+  const projectId = db.detectProjectId(process.cwd());
 
-  // Fetch recent session summaries
-  const recent = db.getRecentSessions(handle, 3);
+  // Register this session
+  db.upsertSession(handle, {
+    id: sessionId,
+    startedAt: new Date().toISOString(),
+    projectId,
+  });
+
+  // Fetch recent session summaries (same project first)
+  const recent = db.getRecentProjectSessions(handle, { projectId, limit: 3 });
   if (recent.length > 0) {
     const summaryLines = recent.map((s) => {
       const branch = s.branch ? ` (branch: ${s.branch})` : '';
@@ -55,12 +67,62 @@ if (handle) {
     parts.push(`## Pending Tasks\n\n${taskLines.join('\n')}`);
   }
 
-  // Inject relevant knowledge entries (keyword search — no embedding in hooks)
-  const knowledge = db.getAllKnowledge(handle, 10);
+  // ── Smart knowledge retrieval ──
+  // 1. Collect search hints from environment: branch, cwd basename, recent files
+  const searchHints = [];
+
+  try {
+    const branch = require('child_process')
+      .execSync('git branch --show-current', { cwd: process.cwd(), timeout: 3000, encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'] })
+      .trim();
+    if (branch) searchHints.push(branch);
+  } catch { /* not a git repo */ }
+
+  const cwdBase = path.basename(process.cwd());
+  if (cwdBase) searchHints.push(cwdBase);
+
+  // Recent file paths from last session's session_files
+  try {
+    const recentFiles = handle.prepare(`
+      SELECT DISTINCT sf.file_path FROM session_files sf
+      INNER JOIN sessions s ON s.id = sf.session_id
+      ORDER BY s.started_at DESC LIMIT 10
+    `).all();
+    for (const f of recentFiles) {
+      const base = path.basename(f.file_path, path.extname(f.file_path));
+      if (base && base.length > 2) searchHints.push(base);
+    }
+  } catch { /* non-fatal */ }
+
+  // 2. Keyword-matched knowledge (branch, filenames, project name)
+  const uniqueHints = [...new Set(searchHints)].slice(0, 8);
+  let knowledge = [];
+
+  if (uniqueHints.length > 0) {
+    knowledge = db.searchKnowledgeByKeywords(handle, uniqueHints, { projectId, limit: 8 });
+  }
+
+  // 3. Fill remaining slots with project-scoped, confidence-filtered knowledge
+  if (knowledge.length < 8) {
+    const seenIds = new Set(knowledge.map((k) => k.id));
+    const projectKnowledge = db.getProjectKnowledge(handle, {
+      projectId,
+      minConfidence: 0.4,
+      limit: 8 - knowledge.length,
+    });
+    for (const k of projectKnowledge) {
+      if (!seenIds.has(k.id)) {
+        knowledge.push(k);
+        seenIds.add(k.id);
+      }
+    }
+  }
+
   if (knowledge.length > 0) {
-    const knowledgeLines = knowledge.map(
-      (k) => `- **[${k.kind}]** ${k.content} _(${k.source})_`
-    );
+    const knowledgeLines = knowledge.map((k) => {
+      const conf = typeof k.confidence === 'number' ? ` [${Math.round(k.confidence * 100)}%]` : '';
+      return `- **[${k.kind}]**${conf} ${k.content} _(${k.source})_`;
+    });
     parts.push(`## Accumulated Knowledge\n\n${knowledgeLines.join('\n')}`);
   }
 
