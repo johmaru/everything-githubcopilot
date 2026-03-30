@@ -1,49 +1,41 @@
-# Contributing to Everything Claude Code
+# Contributing to Everything GitHub Copilot
 
-Thanks for wanting to contribute! This repo is a community resource for Claude Code users.
+Thanks for contributing. This repository is being migrated into a GitHub Copilot customization pack for VS Code, so new work should target the Copilot layout first.
 
 ## Table of Contents
 
 - [What We're Looking For](#what-were-looking-for)
 - [Quick Start](#quick-start)
-- [Contributing Skills](#contributing-skills)
+- [Contributing Instructions](#contributing-instructions)
+- [Contributing Prompts](#contributing-prompts)
 - [Contributing Agents](#contributing-agents)
 - [Contributing Hooks](#contributing-hooks)
-- [Contributing Commands](#contributing-commands)
 - [MCP and documentation (e.g. Context7)](#mcp-and-documentation-eg-context7)
-- [Cross-Harness and Translations](#cross-harness-and-translations)
 - [Pull Request Process](#pull-request-process)
 
 ---
 
 ## What We're Looking For
 
-### Agents
-New agents that handle specific tasks well:
-- Language-specific reviewers (Python, Go, Rust)
-- Framework experts (Django, Rails, Laravel, Spring)
-- DevOps specialists (Kubernetes, Terraform, CI/CD)
-- Domain experts (ML pipelines, data engineering, mobile)
+### Instructions
 
-### Skills
-Workflow definitions and domain knowledge:
-- Language best practices
-- Framework patterns
-- Testing strategies
-- Architecture guides
+Targeted `.instructions.md` files with explicit `applyTo` patterns for language, framework, or area-specific guidance.
+
+### Prompts
+
+Reusable `.prompt.md` files for slash workflows such as planning, TDD, review, docs, or migration tasks.
+
+### Agents
+
+Custom `.agent.md` personas for persistent specialist behavior, especially planning, review, security, and TDD.
 
 ### Hooks
-Useful automations:
-- Linting/formatting hooks
-- Security checks
-- Validation hooks
-- Notification hooks
 
-### Commands
-Slash commands that invoke useful workflows:
-- Deployment commands
-- Testing commands
-- Code generation commands
+Deterministic `.github/hooks/*.json` automations that enforce validation or post-edit processing.
+
+### Validation And Docs
+
+CI validators, migration docs, and repository documentation that strengthen the Copilot-first layout.
 
 ---
 
@@ -51,181 +43,186 @@ Slash commands that invoke useful workflows:
 
 ```bash
 # 1. Fork and clone
-gh repo fork affaan-m/everything-claude-code --clone
-cd everything-claude-code
+gh repo fork johmaru/everything-githubcopilot --clone
+cd everything-githubcopilot
 
 # 2. Create a branch
 git checkout -b feat/my-contribution
 
-# 3. Add your contribution (see sections below)
+# 3. Add your contribution under .github/ first
 
-# 4. Test locally
-cp -r skills/my-skill ~/.claude/skills/  # for skills
-# Then test with Claude Code
+# 4. Validate locally
+npm test
+npm run lint
 
 # 5. Submit PR
-git add . && git commit -m "feat: add my-skill" && git push -u origin feat/my-contribution
+git add . && git commit -m "feat: add copilot customization" && git push -u origin feat/my-contribution
 ```
 
 ---
 
-## Contributing Skills
+## Contributing Instructions
 
-Skills are knowledge modules that Claude Code loads based on context.
+Instructions are the first choice for project conventions in GitHub Copilot.
 
-### Directory Structure
+### File Location
 
 ```
-skills/
-└── your-skill-name/
-    └── SKILL.md
+.github/instructions/your-topic.instructions.md
 ```
 
-### SKILL.md Template
+### Instructions Template
 
 ```markdown
 ---
-name: your-skill-name
-description: Brief description shown in skill list
-origin: ECC
+name: 'Your Instruction Name'
+description: 'Use when editing the relevant files or performing the relevant task.'
+applyTo: '**/*.ts'
 ---
 
-# Your Skill Title
+# Your Instruction Title
 
-Brief overview of what this skill covers.
-
-## Core Concepts
-
-Explain key patterns and guidelines.
-
-## Code Examples
-
-\`\`\`typescript
-// Include practical, tested examples
-function example() {
-  // Well-commented code
-}
-\`\`\`
-
-## Best Practices
-
-- Actionable guidelines
-- Do's and don'ts
-- Common pitfalls to avoid
-
-## When to Use
-
-Describe scenarios where this skill applies.
+- Keep rules short and explicit.
+- Explain the preferred pattern and why it exists.
+- Use narrow `applyTo` patterns instead of broad global matching.
 ```
 
-### Skill Checklist
+### Instructions Checklist
 
-- [ ] Focused on one domain/technology
-- [ ] Includes practical code examples
-- [ ] Under 500 lines
-- [ ] Uses clear section headers
-- [ ] Tested with Claude Code
+- [ ] Stored under `.github/instructions/`
+- [ ] Valid YAML frontmatter
+- [ ] Has a discoverable `description`
+- [ ] Has an explicit `applyTo` when automatic loading is intended
+- [ ] Avoids duplicating always-on guidance already covered by `.github/copilot-instructions.md`
 
-### Example Skills
+### Guidance
 
-| Skill | Purpose |
-|-------|---------|
-| `coding-standards/` | TypeScript/JavaScript patterns |
-| `frontend-patterns/` | React and Next.js best practices |
-| `backend-patterns/` | API and database patterns |
-| `security-review/` | Security checklist |
+- Use instructions for language-specific or area-specific rules.
+- Prefer multiple focused instruction files over one large file.
+- Do not make critical behavior depend on semantic-only loading when `applyTo` can be used.
+
+## Contributing Prompts
+
+Prompt files are the preferred way to define reusable slash workflows.
+
+### File Location
+
+```
+.github/prompts/your-workflow.prompt.md
+```
+
+### Prompt Template
+
+```markdown
+---
+name: 'your-workflow'
+description: 'What this reusable slash workflow does.'
+agent: 'planner'
+argument-hint: 'Describe the work to run with this prompt'
+---
+
+Use [the repository-wide instructions](../copilot-instructions.md).
+
+1. Restate the request.
+2. Execute the workflow.
+3. Report the result and validation.
+```
+
+### Prompt Checklist
+
+- [ ] Stored under `.github/prompts/`
+- [ ] Valid YAML frontmatter
+- [ ] Uses a real built-in agent or existing custom agent name
+- [ ] References relevant instruction files instead of duplicating rules
+- [ ] Has a clear output expectation
 
 ---
 
 ## Contributing Agents
 
-Agents are specialized assistants invoked via the Task tool.
+Agents are specialized Copilot personas for persistent workflows.
 
 ### File Location
 
 ```
-agents/your-agent-name.md
+.github/agents/your-agent-name.agent.md
 ```
 
 ### Agent Template
 
 ```markdown
 ---
-name: your-agent-name
-description: What this agent does and when Claude should invoke it. Be specific!
-tools: ["Read", "Write", "Edit", "Bash", "Grep", "Glob"]
-model: sonnet
+name: 'your-agent-name'
+description: 'Use when this specialist persona is appropriate.'
+argument-hint: 'What the user should provide'
 ---
 
-You are a [role] specialist.
+# Your Agent Title
 
-## Your Role
+You are a specialist for this workflow.
 
-- Primary responsibility
-- Secondary responsibility
-- What you DO NOT do (boundaries)
+## Goals
+
+- Primary goal
+- Secondary goal
 
 ## Workflow
 
-### Step 1: Understand
-How you approach the task.
-
-### Step 2: Execute
-How you perform the work.
-
-### Step 3: Verify
-How you validate results.
-
-## Output Format
-
-What you return to the user.
-
-## Examples
-
-### Example: [Scenario]
-Input: [what user provides]
-Action: [what you do]
-Output: [what you return]
+1. Understand the request.
+2. Execute within scope.
+3. Report clearly.
 ```
 
-### Agent Fields
+### Agent Checklist
 
-| Field | Description | Options |
-|-------|-------------|---------|
-| `name` | Lowercase, hyphenated | `code-reviewer` |
-| `description` | Used to decide when to invoke | Be specific! |
-| `tools` | Only what's needed | `Read, Write, Edit, Bash, Grep, Glob, WebFetch, Task`, or MCP tool names (e.g. `mcp__context7__resolve-library-id`, `mcp__context7__query-docs`) when the agent uses MCP |
-| `model` | Complexity level | `haiku` (simple), `sonnet` (coding), `opus` (complex) |
+- [ ] Stored under `.github/agents/`
+- [ ] Uses valid YAML frontmatter
+- [ ] Description includes strong trigger phrases
+- [ ] Keeps persona narrow and practical
+- [ ] Avoids depending on hidden legacy behavior
 
 ### Example Agents
 
-| Agent | Purpose |
-|-------|---------|
-| `tdd-guide.md` | Test-driven development |
-| `code-reviewer.md` | Code review |
-| `security-reviewer.md` | Security scanning |
-| `build-error-resolver.md` | Fix build errors |
+| Agent                        | Purpose                              |
+| ---------------------------- | ------------------------------------ |
+| `planner.agent.md`           | Planning and migration decomposition |
+| `architect.agent.md`         | Architecture and trade-off analysis  |
+| `tdd-guide.agent.md`         | Test-driven implementation           |
+| `code-reviewer.agent.md`     | Review current change set            |
+| `security-reviewer.agent.md` | Security-focused review              |
+| `build-error-resolver.agent.md` | Minimal build and validator fixes |
+| `docs-lookup.agent.md` | Current docs and API lookup |
+| `e2e-runner.agent.md` | E2E workflow generation and execution |
+| `refactor-cleaner.agent.md` | Safe dead-code cleanup |
 
 ---
 
 ## Contributing Hooks
 
-Hooks are automatic behaviors triggered by Claude Code events.
+Hooks are deterministic automations for VS Code Copilot.
 
 ### File Location
 
 ```
-hooks/hooks.json
+.github/hooks/your-hook.json
 ```
+
+### Hook Guidance
+
+- Prefer `.github/hooks/*.json` over legacy `.claude/settings.json` or `hooks/hooks.json`.
+- Keep hooks deterministic and small.
+- Prefer format, typecheck, validation, or approval controls.
+- Avoid complex orchestration, session persistence, or continuous learning hooks in the active Copilot path.
+- Use `.github/hooks/deterministic-hooks.json` as the current reference pattern for Copilot-first hook definitions in this repository.
 
 ### Hook Types
 
-| Type | Trigger | Use Case |
-|------|---------|----------|
-| `PreToolUse` | Before tool runs | Validate, warn, block |
-| `PostToolUse` | After tool runs | Format, check, notify |
-| `SessionStart` | Session begins | Load context |
-| `Stop` | Session ends | Cleanup, audit |
+| Type           | Trigger          | Use Case              |
+| -------------- | ---------------- | --------------------- |
+| `PreToolUse`   | Before tool runs | Validate, warn, block |
+| `PostToolUse`  | After tool runs  | Format, check, notify |
+| `SessionStart` | Session begins   | Load context          |
+| `Stop`         | Session ends     | Cleanup, audit        |
 
 ### Hook Format
 
@@ -299,88 +296,14 @@ tool == "Bash" && tool_input.command matches "git push"
 
 ---
 
-## Contributing Commands
-
-Commands are user-invoked actions with `/command-name`.
-
-### File Location
-
-```
-commands/your-command.md
-```
-
-### Command Template
-
-```markdown
----
-description: Brief description shown in /help
----
-
-# Command Name
-
-## Purpose
-
-What this command does.
-
-## Usage
-
-\`\`\`
-/your-command [args]
-\`\`\`
-
-## Workflow
-
-1. First step
-2. Second step
-3. Final step
-
-## Output
-
-What the user receives.
-```
-
-### Example Commands
-
-| Command | Purpose |
-|---------|---------|
-| `commit.md` | Create git commits |
-| `code-review.md` | Review code changes |
-| `tdd.md` | TDD workflow |
-| `e2e.md` | E2E testing |
-
----
-
 ## MCP and documentation (e.g. Context7)
 
 Skills and agents can use **MCP (Model Context Protocol)** tools to pull in up-to-date data instead of relying only on training data. This is especially useful for documentation.
 
 - **Context7** is an MCP server that exposes `resolve-library-id` and `query-docs`. Use it when the user asks about libraries, frameworks, or APIs so answers reflect current docs and code examples.
-- When contributing **skills** that depend on live docs (e.g. setup, API usage), describe how to use the relevant MCP tools (e.g. resolve the library ID, then query docs) and point to the `documentation-lookup` skill or Context7 as the pattern.
-- When contributing **agents** that answer docs/API questions, include the Context7 MCP tool names (e.g. `mcp__context7__resolve-library-id`, `mcp__context7__query-docs`) in the agent's tools and document the resolve → query workflow.
-- **mcp-configs/mcp-servers.json** includes a Context7 entry; users enable it in their harness (e.g. Claude Code, Cursor) to use the documentation-lookup skill (in `skills/documentation-lookup/`) and the `/docs` command.
-
----
-
-## Cross-Harness and Translations
-
-### Skill subsets (Codex and Cursor)
-
-ECC ships skill subsets for other harnesses:
-
-- **Codex:** `.agents/skills/` — skills listed in `agents/openai.yaml` are loaded by Codex.
-- **Cursor:** `.cursor/skills/` — a subset of skills is bundled for Cursor.
-
-When you **add a new skill** that should be available on Codex or Cursor:
-
-1. Add the skill under `skills/your-skill-name/` as usual.
-2. If it should be available on **Codex**, add it to `.agents/skills/` (copy the skill directory or add a reference) and ensure it is referenced in `agents/openai.yaml` if required.
-3. If it should be available on **Cursor**, add it under `.cursor/skills/` per Cursor's layout.
-
-Check existing skills in those directories for the expected structure. Keeping these subsets in sync is manual; mention in your PR if you updated them.
-
-### Translations
-
-Translations live under `docs/` (e.g. `docs/zh-CN`, `docs/zh-TW`, `docs/ja-JP`). If you change agents, commands, or skills that are translated, consider updating the corresponding translation files or opening an issue so maintainers or translators can update them.
+- When contributing **instructions or prompts** that depend on live docs, describe the intended MCP-assisted workflow clearly and point to Context7 as the pattern.
+- When contributing **agents** that answer docs/API questions, document the resolve -> query workflow and keep the agent scoped to documentation lookup rather than broad research.
+- Active Copilot integrations should be documented and validated explicitly.
 
 ---
 
@@ -389,33 +312,41 @@ Translations live under `docs/` (e.g. `docs/zh-CN`, `docs/zh-TW`, `docs/ja-JP`).
 ### 1. PR Title Format
 
 ```
-feat(skills): add rust-patterns skill
-feat(agents): add api-designer agent
-feat(hooks): add auto-format hook
-fix(skills): update React patterns
-docs: improve contributing guide
+feat(instructions): add python standards instructions
+feat(prompts): add review workflow prompt
+feat(agents): add architecture review agent
+feat(hooks): add post-edit formatter hook
+docs: update copilot migration docs
 ```
 
 ### 2. PR Description
 
 ```markdown
 ## Summary
-What you're adding and why.
+
+What changed and why.
 
 ## Type
-- [ ] Skill
+
+- [ ] Instructions
+- [ ] Prompt
 - [ ] Agent
 - [ ] Hook
-- [ ] Command
+- [ ] Docs
+- [ ] Validator or CI
 
 ## Testing
-How you tested this.
+
+Commands run and what they validated.
 
 ## Checklist
-- [ ] Follows format guidelines
-- [ ] Tested with Claude Code
-- [ ] No sensitive info (API keys, paths)
-- [ ] Clear descriptions
+
+- [ ] `.github/` is used as the primary source of truth
+- [ ] Frontmatter is valid
+- [ ] `description` fields are explicit
+- [ ] `applyTo` is narrow and intentional when used
+- [ ] No sensitive info or machine-specific paths
+- [ ] `npm test` and `npm run lint` were run, or the reason they were not run is documented
 ```
 
 ### 3. Review Process
@@ -429,6 +360,7 @@ How you tested this.
 ## Guidelines
 
 ### Do
+
 - Keep contributions focused and modular
 - Include clear descriptions
 - Test before submitting
@@ -436,6 +368,7 @@ How you tested this.
 - Document dependencies
 
 ### Don't
+
 - Include sensitive data (API keys, tokens, paths)
 - Add overly complex or niche configs
 - Submit untested contributions
@@ -445,16 +378,16 @@ How you tested this.
 
 ## File Naming
 
-- Use lowercase with hyphens: `python-reviewer.md`
-- Be descriptive: `tdd-workflow.md` not `workflow.md`
+- Use lowercase with hyphens: `python-testing.instructions.md`, `code-reviewer.agent.md`
+- Be descriptive: `tdd-workflow.prompt.md` not `workflow.prompt.md`
 - Match name to filename
 
 ---
 
 ## Questions?
 
-- **Issues:** [github.com/affaan-m/everything-claude-code/issues](https://github.com/affaan-m/everything-claude-code/issues)
-- **X/Twitter:** [@affaanmustafa](https://x.com/affaanmustafa)
+- **Issues:** [github.com/johmaru/everything-githubcopilot/issues](https://github.com/johmaru/everything-githubcopilot/issues)
+- **GitHub:** [johmaru](https://github.com/johmaru)
 
 ---
 

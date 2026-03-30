@@ -1,0 +1,92 @@
+{
+  "$schema": "../../schemas/hooks.schema.json",
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "tool == \"Bash\" && tool_input.command matches \"^git(\\\\s|$)\"",
+        "description": "Block git hook-bypass flags so pre-commit, commit-msg, and pre-push protections are not skipped.",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "npx block-no-verify@1.1.2"
+          }
+        ]
+      },
+      {
+        "matcher": "Bash",
+        "description": "Warn before git push so the current diff gets reviewed before publishing changes.",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node scripts/hooks/pre-bash-git-push-reminder.js"
+          }
+        ]
+      },
+      {
+        "matcher": "Write",
+        "description": "Warn about non-standard documentation file paths before writes.",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node scripts/hooks/doc-file-warning.js"
+          }
+        ]
+      },
+      {
+        "matcher": "Write|Edit|MultiEdit",
+        "description": "Block edits to formatter and linter config files instead of weakening validation rules.",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node scripts/hooks/config-protection.js",
+            "timeout": 5
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "Edit|Write|MultiEdit",
+        "description": "Run lightweight quality-gate checks after edits.",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node scripts/hooks/quality-gate.js",
+            "async": true,
+            "timeout": 30
+          }
+        ]
+      },
+      {
+        "matcher": "Edit",
+        "description": "Auto-format JS and TS files after edits.",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node scripts/hooks/post-edit-format.js"
+          }
+        ]
+      },
+      {
+        "matcher": "Edit",
+        "description": "Run a targeted TypeScript check after editing TS files.",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node scripts/hooks/post-edit-typecheck.js"
+          }
+        ]
+      },
+      {
+        "matcher": "Edit",
+        "description": "Warn when edited JS or TS files still contain console.log statements.",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node scripts/hooks/post-edit-console-warn.js"
+          }
+        ]
+      }
+    ]
+  }
+}

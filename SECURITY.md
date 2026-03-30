@@ -4,17 +4,17 @@
 
 | Version | Supported          |
 | ------- | ------------------ |
+| 2.0.x   | :white_check_mark: |
 | 1.9.x   | :white_check_mark: |
-| 1.8.x   | :white_check_mark: |
-| < 1.8   | :x:                |
+| < 1.9   | :x:                |
 
 ## Reporting a Vulnerability
 
-If you discover a security vulnerability in ECC, please report it responsibly.
+If you discover a security vulnerability in this project, please report it responsibly.
 
 **Do not open a public GitHub issue for security vulnerabilities.**
 
-Instead, email **security@ecc.tools** with:
+Instead, use [GitHub Security Advisories](https://github.com/johmaru/everything-githubcopilot/security/advisories) or email the maintainer with:
 
 - A description of the vulnerability
 - Steps to reproduce
@@ -39,15 +39,15 @@ If the vulnerability is declined, we will explain why and provide guidance on wh
 
 This policy covers:
 
-- The ECC plugin and all scripts in this repository
+- All scripts and customization files in this repository
 - Hook scripts that execute on your machine
-- Install/uninstall/repair lifecycle scripts
-- MCP configurations shipped with ECC
+- Install/uninstall lifecycle scripts
+- MCP configurations shipped with this project
 - The AgentShield security scanner ([github.com/affaan-m/agentshield](https://github.com/affaan-m/agentshield))
 
 ## Security Resources
 
-- **AgentShield**: Scan your agent config for vulnerabilities — `npx ecc-agentshield scan`
+- **AgentShield**: Scan your agent config for vulnerabilities — `npx agentshield scan`
 - **Security Guide**: [The Shorthand Guide to Everything Agentic Security](./the-security-guide.md)
 - **OWASP MCP Top 10**: [owasp.org/www-project-mcp-top-10](https://owasp.org/www-project-mcp-top-10/)
 - **OWASP Agentic Applications Top 10**: [genai.owasp.org](https://genai.owasp.org/resource/owasp-top-10-for-agentic-applications-for-2026/)

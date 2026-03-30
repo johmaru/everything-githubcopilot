@@ -127,16 +127,5 @@ jobs:
             *) echo "Unsupported package manager: ${{ inputs.package-manager }}" && exit 1 ;;
           esac
 
-      - name: Run tests
-        run: node tests/run-all.js
-        env:
-          CLAUDE_CODE_PACKAGE_MANAGER: ${{ inputs.package-manager }}
-
-      - name: Upload test artifacts
-        if: failure()
-        uses: actions/upload-artifact@v4
-        with:
-          name: test-results-${{ inputs.os }}-node${{ inputs.node-version }}-${{ inputs.package-manager }}
-          path: |
-            tests/
-            !tests/node_modules/
+      - name: Run validation
+        run: npm run validate

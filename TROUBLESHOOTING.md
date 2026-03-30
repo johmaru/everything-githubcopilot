@@ -1,422 +1,159 @@
 # Troubleshooting Guide
 
-Common issues and solutions for Everything Claude Code (ECC) plugin.
+Common issues and fixes for the GitHub Copilot-first customization layout in this repository.
 
 ## Table of Contents
 
-- [Memory & Context Issues](#memory--context-issues)
-- [Agent Harness Failures](#agent-harness-failures)
-- [Hook & Workflow Errors](#hook--workflow-errors)
-- [Installation & Setup](#installation--setup)
-- [Performance Issues](#performance-issues)
-- [Common Error Messages](#common-error-messages)
+- [Instructions, Prompts, Or Agents Not Showing Up](#instructions-prompts-or-agents-not-showing-up)
+- [Legacy `.claude` Behavior Is Still Taking Over](#legacy-claude-behavior-is-still-taking-over)
+- [Validation Fails](#validation-fails)
+- [Hook Problems](#hook-problems)
+- [Prompt Or Agent Names Do Not Match](#prompt-or-agent-names-do-not-match)
 - [Getting Help](#getting-help)
 
 ---
 
-## Memory & Context Issues
+## Instructions, Prompts, Or Agents Not Showing Up
 
-### Context Window Overflow
+**Symptoms:** VS Code or GitHub Copilot does not surface the expected customizations.
 
-**Symptom:** "Context too long" errors or incomplete responses
+**Check these first:**
 
-**Causes:**
-- Large file uploads exceeding token limits
-- Accumulated conversation history
-- Multiple large tool outputs in single session
-
-**Solutions:**
 ```bash
-# 1. Clear conversation history and start fresh
-# Use Claude Code: "New Chat" or Cmd/Ctrl+Shift+N
+# Validate the active customization files
+npm test
 
-# 2. Reduce file size before analysis
-head -n 100 large-file.log > sample.log
-
-# 3. Use streaming for large outputs
-head -n 50 large-file.txt
-
-# 4. Split tasks into smaller chunks
-# Instead of: "Analyze all 50 files"
-# Use: "Analyze files in src/components/ directory"
+# Inspect the active directories
+dir .github\instructions
+dir .github\prompts
+dir .github\agents
+dir .github\hooks
 ```
 
-### Memory Persistence Failures
+Common causes:
 
-**Symptom:** Agent doesn't remember previous context or observations
+- the file is not under `.github/`
+- frontmatter is invalid
+- the prompt or agent name does not match the intended invocation
+- the instruction has no usable `applyTo`
 
-**Causes:**
-- Disabled continuous-learning hooks
-- Corrupted observation files
-- Project detection failures
+Fixes:
 
-**Solutions:**
-```bash
-# Check if observations are being recorded
-ls ~/.claude/homunculus/projects/*/observations.jsonl
-
-# Find the current project's hash id
-python3 - <<'PY'
-import json, os
-registry_path = os.path.expanduser("~/.claude/homunculus/projects.json")
-with open(registry_path) as f:
-    registry = json.load(f)
-for project_id, meta in registry.items():
-    if meta.get("root") == os.getcwd():
-        print(project_id)
-        break
-else:
-    raise SystemExit("Project hash not found in ~/.claude/homunculus/projects.json")
-PY
-
-# View recent observations for that project
-tail -20 ~/.claude/homunculus/projects/<project-hash>/observations.jsonl
-
-# Back up a corrupted observations file before recreating it
-mv ~/.claude/homunculus/projects/<project-hash>/observations.jsonl \
-  ~/.claude/homunculus/projects/<project-hash>/observations.jsonl.bak.$(date +%Y%m%d-%H%M%S)
-
-# Verify hooks are enabled
-grep -r "observe" ~/.claude/settings.json
-```
+- move the asset into the correct `.github/` directory
+- repair frontmatter and rerun validation
+- keep prompt and agent names explicit and consistent
+- narrow `applyTo` instead of relying on broad or ambiguous matching
 
 ---
 
-## Agent Harness Failures
+## Legacy `.claude` Behavior Is Still Taking Over
 
-### Agent Not Found
+**Symptoms:** Copilot seems to follow old guidance instead of the repository's `.github` files.
 
-**Symptom:** "Agent not loaded" or "Unknown agent" errors
+Check:
 
-**Causes:**
-- Plugin not installed correctly
-- Agent path misconfiguration
-- Marketplace vs manual install mismatch
+- `.vscode/settings.json` exists and is present in the workspace
+- changes were added under `.github/`, not only under legacy directories
+- the docs you followed were Copilot-first, not historical instructions
 
-**Solutions:**
-```bash
-# Check plugin installation
-ls ~/.claude/plugins/cache/
+Rule of thumb:
 
-# Verify agent exists (marketplace install)
-ls ~/.claude/plugins/cache/*/agents/
-
-# For manual install, agents should be in:
-ls ~/.claude/agents/  # Custom agents only
-
-# Reload plugin
-# Claude Code → Settings → Extensions → Reload
-```
-
-### Workflow Execution Hangs
-
-**Symptom:** Agent starts but never completes
-
-**Causes:**
-- Infinite loops in agent logic
-- Blocked on user input
-- Network timeout waiting for API
-
-**Solutions:**
-```bash
-# 1. Check for stuck processes
-ps aux | grep claude
-
-# 2. Enable debug mode
-export CLAUDE_DEBUG=1
-
-# 3. Set shorter timeouts
-export CLAUDE_TIMEOUT=30
-
-# 4. Check network connectivity
-curl -I https://api.anthropic.com
-```
-
-### Tool Use Errors
-
-**Symptom:** "Tool execution failed" or permission denied
-
-**Causes:**
-- Missing dependencies (npm, python, etc.)
-- Insufficient file permissions
-- Path not found
-
-**Solutions:**
-```bash
-# Verify required tools are installed
-which node python3 npm git
-
-# Fix permissions on hook scripts
-chmod +x ~/.claude/plugins/cache/*/hooks/*.sh
-chmod +x ~/.claude/plugins/cache/*/skills/*/hooks/*.sh
-
-# Check PATH includes necessary binaries
-echo $PATH
-```
+- if `.github` and legacy files disagree, follow `.github`
 
 ---
 
-## Hook & Workflow Errors
+## Validation Fails
 
-### Hooks Not Firing
+**Symptoms:** `npm test` or `npm run lint` fails on customization or hook validation.
 
-**Symptom:** Pre/post hooks don't execute
+Useful commands:
 
-**Causes:**
-- Hooks not registered in settings.json
-- Invalid hook syntax
-- Hook script not executable
-
-**Solutions:**
 ```bash
-# Check hooks are registered
-grep -A 10 '"hooks"' ~/.claude/settings.json
-
-# Verify hook files exist and are executable
-ls -la ~/.claude/plugins/cache/*/hooks/
-
-# Test hook manually
-bash ~/.claude/plugins/cache/*/hooks/pre-bash.sh <<< '{"command":"echo test"}'
-
-# Re-register hooks (if using plugin)
-# Disable and re-enable plugin in Claude Code settings
+npm test
+npm run lint
 ```
 
-### Python/Node Version Mismatches
+Typical causes:
 
-**Symptom:** "python3 not found" or "node: command not found"
+- invalid YAML frontmatter in instructions, prompts, or agents
+- malformed JSON in `.github/hooks/*.json`
+- missing required metadata fields
+- stale documentation describing old structure as active
 
-**Causes:**
-- Missing Python/Node installation
-- PATH not configured
-- Wrong Python version (Windows)
+Fixes:
 
-**Solutions:**
-```bash
-# Install Python 3 (if missing)
-# macOS: brew install python3
-# Ubuntu: sudo apt install python3
-# Windows: Download from python.org
-
-# Install Node.js (if missing)
-# macOS: brew install node
-# Ubuntu: sudo apt install nodejs npm
-# Windows: Download from nodejs.org
-
-# Verify installations
-python3 --version
-node --version
-npm --version
-
-# Windows: Ensure python (not python3) works
-python --version
-```
-
-### Dev Server Blocker False Positives
-
-**Symptom:** Hook blocks legitimate commands mentioning "dev"
-
-**Causes:**
-- Heredoc content triggering pattern match
-- Non-dev commands with "dev" in arguments
-
-**Solutions:**
-```bash
-# This is fixed in v1.8.0+ (PR #371)
-# Upgrade plugin to latest version
-
-# Workaround: Wrap dev servers in tmux
-tmux new-session -d -s dev "npm run dev"
-tmux attach -t dev
-
-# Disable hook temporarily if needed
-# Edit ~/.claude/settings.json and remove pre-bash hook
-```
+- validate the changed file format first
+- compare with an existing valid file in the same directory
+- update docs if the active workflow changed
+- keep `.github` as the primary source of truth
 
 ---
 
-## Installation & Setup
+## Hook Problems
 
-### Plugin Not Loading
+**Symptoms:** hooks do not run, run too broadly, or produce noisy results.
 
-**Symptom:** Plugin features unavailable after install
+What to check:
 
-**Causes:**
-- Marketplace cache not updated
-- Claude Code version incompatibility
-- Corrupted plugin files
+- the hook lives under `.github/hooks/`
+- the JSON is valid
+- the matcher is narrow enough to be predictable
+- the hook does not depend on undocumented external state
 
-**Solutions:**
-```bash
-# Inspect the plugin cache before changing it
-ls -la ~/.claude/plugins/cache/
+Good debugging pattern:
 
-# Back up the plugin cache instead of deleting it in place
-mv ~/.claude/plugins/cache ~/.claude/plugins/cache.backup.$(date +%Y%m%d-%H%M%S)
-mkdir -p ~/.claude/plugins/cache
+- reduce the matcher scope
+- validate the hook file again
+- compare with `.github/hooks/deterministic-hooks.json`
+- avoid adding heavyweight behavior to every edit or tool call
 
-# Reinstall from marketplace
-# Claude Code → Extensions → Everything Claude Code → Uninstall
-# Then reinstall from marketplace
-
-# Check Claude Code version
-claude --version
-# Requires Claude Code 2.0+
-
-# Manual install (if marketplace fails)
-git clone https://github.com/affaan-m/everything-claude-code.git
-cp -r everything-claude-code ~/.claude/plugins/ecc
-```
-
-### Package Manager Detection Fails
-
-**Symptom:** Wrong package manager used (npm instead of pnpm)
-
-**Causes:**
-- No lock file present
-- CLAUDE_PACKAGE_MANAGER not set
-- Multiple lock files confusing detection
-
-**Solutions:**
-```bash
-# Set preferred package manager globally
-export CLAUDE_PACKAGE_MANAGER=pnpm
-# Add to ~/.bashrc or ~/.zshrc
-
-# Or set per-project
-echo '{"packageManager": "pnpm"}' > .claude/package-manager.json
-
-# Or use package.json field
-npm pkg set packageManager="pnpm@8.15.0"
-
-# Warning: removing lock files can change installed dependency versions.
-# Commit or back up the lock file first, then run a fresh install and re-run CI.
-# Only do this when intentionally switching package managers.
-rm package-lock.json  # If using pnpm/yarn/bun
-```
+If a hook behaves like hidden orchestration, redesign it. The active hook path should stay deterministic.
 
 ---
 
-## Performance Issues
+## Prompt Or Agent Names Do Not Match
 
-### Slow Response Times
+**Symptoms:** the workflow exists on disk but cannot be invoked as expected.
 
-**Symptom:** Agent takes 30+ seconds to respond
+Check that:
 
-**Causes:**
-- Large observation files
-- Too many active hooks
-- Network latency to API
+- the frontmatter `name` is what you intend users to invoke
+- filenames and logical names stay aligned
+- prompts reference real agents when an `agent` field is used
+- docs use the current names rather than historical ECC command names
 
-**Solutions:**
-```bash
-# Archive large observations instead of deleting them
-archive_dir="$HOME/.claude/homunculus/archive/$(date +%Y%m%d)"
-mkdir -p "$archive_dir"
-find ~/.claude/homunculus/projects -name "observations.jsonl" -size +10M -exec sh -c '
-  for file do
-    base=$(basename "$(dirname "$file")")
-    gzip -c "$file" > "'"$archive_dir"'/${base}-observations.jsonl.gz"
-    : > "$file"
-  done
-' sh {} +
-
-# Disable unused hooks temporarily
-# Edit ~/.claude/settings.json
-
-# Keep active observation files small
-# Large archives should live under ~/.claude/homunculus/archive/
-```
-
-### High CPU Usage
-
-**Symptom:** Claude Code consuming 100% CPU
-
-**Causes:**
-- Infinite observation loops
-- File watching on large directories
-- Memory leaks in hooks
-
-**Solutions:**
-```bash
-# Check for runaway processes
-top -o cpu | grep claude
-
-# Disable continuous learning temporarily
-touch ~/.claude/homunculus/disabled
-
-# Restart Claude Code
-# Cmd/Ctrl+Q then reopen
-
-# Check observation file size
-du -sh ~/.claude/homunculus/*/
-```
+This mismatch often happens during migration when a legacy command name is copied into new docs without updating the actual prompt file.
 
 ---
 
-## Common Error Messages
+## Performance And Context Issues
 
-### "EACCES: permission denied"
+**Symptoms:** too much irrelevant guidance, slow interactions, or noisy automation.
 
-```bash
-# Fix hook permissions
-find ~/.claude/plugins -name "*.sh" -exec chmod +x {} \;
+Common causes:
 
-# Fix observation directory permissions
-chmod -R u+rwX,go+rX ~/.claude/homunculus
-```
+- instructions are too broad
+- hooks run on too many events
+- prompts duplicate rules already present elsewhere
+- contributors rely on too many legacy compatibility surfaces at once
 
-### "MODULE_NOT_FOUND"
+Fixes:
 
-```bash
-# Install plugin dependencies
-cd ~/.claude/plugins/cache/everything-claude-code
-npm install
+- keep repository-wide instructions short
+- move specific guidance into narrow `applyTo` instruction files
+- prefer a small set of strong prompts over many overlapping workflows
+- keep hooks cheap and deterministic
 
-# Or for manual install
-cd ~/.claude/plugins/ecc
-npm install
-```
-
-### "spawn UNKNOWN"
-
-```bash
-# Windows-specific: Ensure scripts use correct line endings
-# Convert CRLF to LF
-find ~/.claude/plugins -name "*.sh" -exec dos2unix {} \;
-
-# Or install dos2unix
-# macOS: brew install dos2unix
-# Ubuntu: sudo apt install dos2unix
-```
+The migration is partly a performance project: less ambiguity, less duplication, fewer hidden paths.
 
 ---
 
 ## Getting Help
 
- If you're still experiencing issues:
+If you still hit a problem:
 
-1. **Check GitHub Issues**: [github.com/affaan-m/everything-claude-code/issues](https://github.com/affaan-m/everything-claude-code/issues)
-2. **Enable Debug Logging**:
-   ```bash
-   export CLAUDE_DEBUG=1
-   export CLAUDE_LOG_LEVEL=debug
-   ```
-3. **Collect Diagnostic Info**:
-   ```bash
-   claude --version
-   node --version
-   python3 --version
-   echo $CLAUDE_PACKAGE_MANAGER
-   ls -la ~/.claude/plugins/cache/
-   ```
-4. **Open an Issue**: Include debug logs, error messages, and diagnostic info
-
----
-
-## Related Documentation
-
-- [README.md](./README.md) - Installation and features
-- [CONTRIBUTING.md](./CONTRIBUTING.md) - Development guidelines
-- [docs/](./docs/) - Detailed documentation
-- [examples/](./examples/) - Usage examples
+1. Read [README.md](./README.md) for the active repository overview.
+2. Read [CONTRIBUTING.md](./CONTRIBUTING.md) for the current authoring model.
+3. Read [docs/migration-status.md](./docs/migration-status.md) for known remaining gaps.
+4. Run `npm test` and `npm run lint`, and include the failing output when reporting an issue.
+5. Open an issue at [github.com/johmaru/everything-githubcopilot/issues](https://github.com/johmaru/everything-githubcopilot/issues).
