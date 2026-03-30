@@ -46,7 +46,9 @@
     ".codex/",
     ".opencode/",
     "AGENTS.md",
+    "schemas/",
     "scripts/ci/",
+    "scripts/hooks/",
     "docs/"
   ],
   "scripts": {

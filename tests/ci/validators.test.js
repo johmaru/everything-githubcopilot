@@ -328,6 +328,83 @@ function runTests() {
     assert.ok(result.stdout.includes('Validated'), 'Should output validation count');
   })) passed++; else failed++;
 
+  console.log('\nvalidate-github-hooks.js:');
+
+  if (test('passes on real project GitHub hooks', () => {
+    const result = runValidator('validate-github-hooks');
+    assert.strictEqual(result.code, 0, `Should pass, got stderr: ${result.stderr}`);
+    assert.ok(result.stdout.includes('Validated GitHub Copilot hooks'), 'Should output validation count');
+  })) passed++; else failed++;
+
+  if (test('fails when a GitHub hook command references a missing local script', () => {
+    const testDir = createTestDir();
+    writeJson(path.join(testDir, 'schemas', 'hooks.schema.json'), {
+      type: 'object',
+      required: ['hooks'],
+      properties: {
+        hooks: { type: 'object' },
+      },
+      additionalProperties: true,
+    });
+    writeJson(path.join(testDir, '.github', 'hooks', 'deterministic-hooks.json'), {
+      hooks: {
+        PreToolUse: [
+          {
+            matcher: 'Write',
+            hooks: [
+              { type: 'command', command: 'node scripts/hooks/missing.js' },
+            ],
+          },
+        ],
+      },
+    });
+
+    const result = runValidatorWithDirs('validate-github-hooks', {
+      ROOT: testDir,
+      HOOKS_DIR: path.join(testDir, '.github', 'hooks'),
+      HOOKS_SCHEMA_PATH: path.join(testDir, 'schemas', 'hooks.schema.json'),
+    });
+
+    assert.strictEqual(result.code, 1, 'Should fail for missing local hook script');
+    assert.ok(result.stderr.includes('missing local command script'), 'Should report missing script');
+    cleanupTestDir(testDir);
+  })) passed++; else failed++;
+
+  if (test('passes when a GitHub hook command references an existing local script', () => {
+    const testDir = createTestDir();
+    writeJson(path.join(testDir, 'schemas', 'hooks.schema.json'), {
+      type: 'object',
+      required: ['hooks'],
+      properties: {
+        hooks: { type: 'object' },
+      },
+      additionalProperties: true,
+    });
+    fs.mkdirSync(path.join(testDir, 'scripts', 'hooks'), { recursive: true });
+    fs.writeFileSync(path.join(testDir, 'scripts', 'hooks', 'present.js'), 'console.log("ok");');
+    writeJson(path.join(testDir, '.github', 'hooks', 'deterministic-hooks.json'), {
+      hooks: {
+        PreToolUse: [
+          {
+            matcher: 'Write',
+            hooks: [
+              { type: 'command', command: 'node scripts/hooks/present.js' },
+            ],
+          },
+        ],
+      },
+    });
+
+    const result = runValidatorWithDirs('validate-github-hooks', {
+      ROOT: testDir,
+      HOOKS_DIR: path.join(testDir, '.github', 'hooks'),
+      HOOKS_SCHEMA_PATH: path.join(testDir, 'schemas', 'hooks.schema.json'),
+    });
+
+    assert.strictEqual(result.code, 0, 'Should pass when local hook script exists');
+    cleanupTestDir(testDir);
+  })) passed++; else failed++;
+
   // ==========================================
   // catalog.js
   // ==========================================

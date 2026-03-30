@@ -4,9 +4,12 @@
 # Usage:
 #   .\scripts\setup-system.ps1
 #
-# Copies instructions, agents, skills, and prompts to ~/.copilot/ so they
-# apply to every VS Code workspace, and updates VS Code user settings to
-# enable discovery paths.
+# Copies instructions, agents, skills, prompts, hooks, and hook scripts to
+# ~/.copilot/ so they apply to every VS Code workspace, and updates VS Code
+# user settings to enable discovery paths.
+#
+# Hook commands are rewritten to use absolute paths so they work regardless
+# of the current working directory.
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
@@ -81,6 +84,49 @@ if (Test-Path $SrcPrompts) {
     $promptFiles = Get-ChildItem $SrcPrompts -Filter '*.prompt.md' -File
     $promptFiles | Copy-Item -Destination $CopilotPrompts -Force
     Write-Host "  Copied $($promptFiles.Count) prompt files to ~/.copilot/prompts/"
+}
+
+# --- Copy hooks ---
+$CopilotHooks = Join-Path $CopilotBase 'hooks'
+New-Item -ItemType Directory -Path $CopilotHooks -Force | Out-Null
+
+$SrcHooks = Join-Path (Join-Path $RepoRoot '.github') 'hooks'
+if (Test-Path $SrcHooks) {
+    $hookFiles = Get-ChildItem $SrcHooks -Filter '*.json' -File
+    $hookFiles | Copy-Item -Destination $CopilotHooks -Force
+    Write-Host "  Copied $($hookFiles.Count) hook definitions to ~/.copilot/hooks/"
+}
+
+# --- Copy hook scripts ---
+$CopilotHookScripts = Join-Path (Join-Path $CopilotBase 'scripts') 'hooks'
+New-Item -ItemType Directory -Path $CopilotHookScripts -Force | Out-Null
+
+$SrcHookScripts = Join-Path (Join-Path $RepoRoot 'scripts') 'hooks'
+if (Test-Path $SrcHookScripts) {
+    $scriptFiles = Get-ChildItem $SrcHookScripts -Filter '*.js' -File
+    $scriptFiles | Copy-Item -Destination $CopilotHookScripts -Force
+    Write-Host "  Copied $($scriptFiles.Count) hook scripts to ~/.copilot/scripts/hooks/"
+}
+
+# --- Copy schemas ---
+$CopilotSchemas = Join-Path $CopilotBase 'schemas'
+New-Item -ItemType Directory -Path $CopilotSchemas -Force | Out-Null
+
+$SrcSchemas = Join-Path $RepoRoot 'schemas'
+if (Test-Path $SrcSchemas) {
+    $schemaFiles = Get-ChildItem $SrcSchemas -Filter '*.json' -File
+    $schemaFiles | Copy-Item -Destination $CopilotSchemas -Force
+    Write-Host "  Copied $($schemaFiles.Count) schema files to ~/.copilot/schemas/"
+}
+
+# --- Rewrite hook command paths to absolute ---
+foreach ($jsonFile in (Get-ChildItem $CopilotHooks -Filter '*.json' -File -ErrorAction SilentlyContinue)) {
+    $json = Get-Content $jsonFile.FullName -Raw
+    $absScriptsHooks = (Join-Path (Join-Path $CopilotBase 'scripts') 'hooks') -replace '\\', '/'
+    $json = $json -replace [regex]::Escape('./scripts/hooks/'), "$absScriptsHooks/"
+    $json = $json -replace [regex]::Escape('../../schemas/hooks.schema.json'), '../schemas/hooks.schema.json'
+    Set-Content $jsonFile.FullName $json -Encoding UTF8
+    Write-Host "  Rewrote hook paths in $($jsonFile.Name) to use absolute script locations"
 }
 
 # --- Update VS Code user settings ---

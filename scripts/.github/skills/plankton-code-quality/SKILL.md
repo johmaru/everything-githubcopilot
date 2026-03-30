@@ -83,14 +83,14 @@ uv sync --all-extras
 claude
 ```
 
-No install command, no plugin config. The hooks in `.github/settings.json` are picked up automatically when you run GitHub Copilot in the Plankton directory.
+No install command, no plugin config. The hooks in `.github/hooks/deterministic-hooks.json` are picked up automatically when you run GitHub Copilot in the Plankton directory.
 
 ### Per-Project Integration
 
 To use Plankton hooks in your own project:
 
 1. Copy `.github/hooks/` directory to your project
-2. Copy `.github/settings.json` hook configuration
+2. Copy the referenced `scripts/hooks/` implementations into your project
 3. Copy linter config files (`.ruff.toml`, `biome.json`, etc.)
 4. Install the linters for your languages
 
@@ -136,7 +136,7 @@ If running both EGP and Plankton hooks:
 
 ## Configuration Reference
 
-Plankton's `.github/hooks/config.json` controls all behavior:
+Plankton's `.github/hooks/deterministic-hooks.json` controls all behavior:
 
 ```json
 {

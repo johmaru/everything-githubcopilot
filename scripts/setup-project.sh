@@ -60,6 +60,12 @@ if [ -d "$REPO_ROOT/.github/hooks" ]; then
   echo "  Copied  .github/hooks/"
 fi
 
+if [ -d "$REPO_ROOT/scripts/hooks" ]; then
+  mkdir -p "$TARGET/scripts/hooks"
+  cp "$REPO_ROOT/scripts/hooks/"*.js "$TARGET/scripts/hooks/" 2>/dev/null || true
+  echo "  Copied  scripts/hooks/"
+fi
+
 # skills/
 if [ -d "$REPO_ROOT/.github/skills" ]; then
   cp -r "$REPO_ROOT/.github/skills" "$GITHUB_DIR/skills"

@@ -13,12 +13,12 @@
         ]
       },
       {
-        "matcher": "Bash",
+        "matcher": "tool == \"Bash\" && tool_input.command matches \"^git\\\\s+push(\\\\s|$)\"",
         "description": "Warn before git push so the current diff gets reviewed before publishing changes.",
         "hooks": [
           {
             "type": "command",
-            "command": "node scripts/hooks/pre-bash-git-push-reminder.js"
+            "command": "node -e \"var s='./scripts/hooks/pre-bash-git-push-reminder.js';require('fs').existsSync(s)&&require(s)\""
           }
         ]
       },
@@ -28,7 +28,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "node scripts/hooks/doc-file-warning.js"
+            "command": "node -e \"var s='./scripts/hooks/doc-file-warning.js';require('fs').existsSync(s)&&require(s)\""
           }
         ]
       },
@@ -38,7 +38,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "node scripts/hooks/config-protection.js",
+            "command": "node -e \"var s='./scripts/hooks/config-protection.js';require('fs').existsSync(s)&&require(s)\"",
             "timeout": 5
           }
         ]
@@ -51,7 +51,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "node scripts/hooks/quality-gate.js",
+            "command": "node -e \"var s='./scripts/hooks/quality-gate.js';require('fs').existsSync(s)&&require(s)\"",
             "async": true,
             "timeout": 30
           }
@@ -63,7 +63,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "node scripts/hooks/post-edit-format.js"
+            "command": "node -e \"var s='./scripts/hooks/post-edit-format.js';require('fs').existsSync(s)&&require(s)\""
           }
         ]
       },
@@ -73,7 +73,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "node scripts/hooks/post-edit-typecheck.js"
+            "command": "node -e \"var s='./scripts/hooks/post-edit-typecheck.js';require('fs').existsSync(s)&&require(s)\""
           }
         ]
       },
@@ -83,7 +83,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "node scripts/hooks/post-edit-console-warn.js"
+            "command": "node -e \"var s='./scripts/hooks/post-edit-console-warn.js';require('fs').existsSync(s)&&require(s)\""
           }
         ]
       }

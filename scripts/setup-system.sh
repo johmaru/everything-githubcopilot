@@ -4,9 +4,12 @@
 # Usage:
 #   ./scripts/setup-system.sh
 #
-# Copies instructions, agents, skills, and prompts to ~/.copilot/ so they
-# apply to every VS Code workspace, and updates VS Code user settings to
-# enable discovery paths.
+# Copies instructions, agents, skills, prompts, hooks, and hook scripts to
+# ~/.copilot/ so they apply to every VS Code workspace, and updates VS Code
+# user settings to enable discovery paths.
+#
+# Hook commands are rewritten to use absolute paths so they work regardless
+# of the current working directory.
 
 set -euo pipefail
 
@@ -92,6 +95,63 @@ if [ -d "$SRC_PROMPTS" ]; then
   done
   echo "  Copied $count prompt files to ~/.copilot/prompts/"
 fi
+
+# --- Copy hooks ---
+COPILOT_HOOKS="$COPILOT_BASE/hooks"
+mkdir -p "$COPILOT_HOOKS"
+
+SRC_HOOKS="$REPO_ROOT/.github/hooks"
+if [ -d "$SRC_HOOKS" ]; then
+  count=0
+  for f in "$SRC_HOOKS"/*.json; do
+    [ -f "$f" ] || continue
+    cp "$f" "$COPILOT_HOOKS/"
+    count=$((count + 1))
+  done
+  echo "  Copied $count hook definitions to ~/.copilot/hooks/"
+fi
+
+# --- Copy hook scripts ---
+COPILOT_HOOK_SCRIPTS="$COPILOT_BASE/scripts/hooks"
+mkdir -p "$COPILOT_HOOK_SCRIPTS"
+
+SRC_HOOK_SCRIPTS="$REPO_ROOT/scripts/hooks"
+if [ -d "$SRC_HOOK_SCRIPTS" ]; then
+  count=0
+  for f in "$SRC_HOOK_SCRIPTS"/*.js; do
+    [ -f "$f" ] || continue
+    cp "$f" "$COPILOT_HOOK_SCRIPTS/"
+    count=$((count + 1))
+  done
+  echo "  Copied $count hook scripts to ~/.copilot/scripts/hooks/"
+fi
+
+# --- Copy schemas ---
+COPILOT_SCHEMAS="$COPILOT_BASE/schemas"
+mkdir -p "$COPILOT_SCHEMAS"
+
+SRC_SCHEMAS="$REPO_ROOT/schemas"
+if [ -d "$SRC_SCHEMAS" ]; then
+  count=0
+  for f in "$SRC_SCHEMAS"/*.json; do
+    [ -f "$f" ] || continue
+    cp "$f" "$COPILOT_SCHEMAS/"
+    count=$((count + 1))
+  done
+  echo "  Copied $count schema files to ~/.copilot/schemas/"
+fi
+
+# --- Rewrite hook command paths to absolute ---
+ABS_SCRIPTS_HOOKS="$COPILOT_BASE/scripts/hooks"
+for jsonfile in "$COPILOT_HOOKS"/*.json; do
+  [ -f "$jsonfile" ] || continue
+  sed -i.bak \
+    -e "s|\./scripts/hooks/|$ABS_SCRIPTS_HOOKS/|g" \
+    -e 's|../../schemas/hooks.schema.json|../schemas/hooks.schema.json|g' \
+    "$jsonfile"
+  rm -f "${jsonfile}.bak"
+  echo "  Rewrote hook paths in $(basename "$jsonfile") to use absolute script locations"
+done
 
 # --- Update VS Code user settings ---
 VSCODE_DIR="$(dirname "$VSCODE_SETTINGS")"

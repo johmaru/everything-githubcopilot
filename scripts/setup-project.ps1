@@ -71,6 +71,14 @@ if (Test-Path $SrcHook) {
     Write-Host "  Copied  .github/hooks/"
 }
 
+$SrcHookScripts = Join-Path $RepoRoot 'scripts\hooks'
+if (Test-Path $SrcHookScripts) {
+    $DstHookScripts = Join-Path (Join-Path $Target 'scripts') 'hooks'
+    New-Item -ItemType Directory -Path $DstHookScripts -Force | Out-Null
+    Get-ChildItem $SrcHookScripts -Filter '*.js' -File | Copy-Item -Destination $DstHookScripts -Force
+    Write-Host "  Copied  scripts/hooks/"
+}
+
 # skills/
 $SrcSkill = Join-Path $RepoRoot '.github\skills'
 if (Test-Path $SrcSkill) {

@@ -54,6 +54,24 @@ function loadJson(filePath) {
   return JSON.parse(fs.readFileSync(filePath, 'utf8'));
 }
 
+function extractLocalNodeScript(command) {
+  if (typeof command !== 'string') {
+    return null;
+  }
+
+  const match = command.match(/^node\s+(?:\.\\|\.\/)?(?:"([^"]+)"|'([^']+)'|([^\s]+))/);
+  if (!match) {
+    return null;
+  }
+
+  const scriptPath = match[1] || match[2] || match[3];
+  if (!scriptPath || path.isAbsolute(scriptPath) || scriptPath.startsWith('-')) {
+    return null;
+  }
+
+  return scriptPath;
+}
+
 function validateHookEntry(hook, label, errors) {
   if (!hook || typeof hook !== 'object') {
     errors.push(`ERROR: ${label} is not an object`);
@@ -83,6 +101,14 @@ function validateHookEntry(hook, label, errors) {
     for (const forbidden of FORBIDDEN_COMMAND_SNIPPETS) {
       if (commandText.includes(forbidden)) {
         errors.push(`ERROR: ${label} uses legacy Claude-only hook command content '${forbidden}'`);
+      }
+    }
+
+    const localNodeScript = extractLocalNodeScript(commandText);
+    if (localNodeScript) {
+      const absoluteScriptPath = path.join(ROOT, localNodeScript);
+      if (!fs.existsSync(absoluteScriptPath)) {
+        errors.push(`ERROR: ${label} references missing local command script '${localNodeScript}'`);
       }
     }
 

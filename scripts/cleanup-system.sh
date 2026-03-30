@@ -4,9 +4,9 @@
 # Usage:
 #   ./scripts/cleanup-system.sh
 #
-# Removes ~/.copilot/{instructions,agents,skills,prompts} that were installed
-# by setup-system.sh. Does NOT modify VS Code user settings -- disable the
-# paths manually if needed.
+# Removes ~/.copilot/{instructions,agents,skills,prompts,hooks,scripts,schemas}
+# that were installed by setup-system.sh. Does NOT modify VS Code user
+# settings -- disable the paths manually if needed.
 
 set -euo pipefail
 
@@ -18,7 +18,7 @@ echo ""
 
 removed=0
 
-for subdir in instructions agents skills prompts; do
+for subdir in instructions agents skills prompts hooks scripts schemas; do
   target="$COPILOT_BASE/$subdir"
   if [ -d "$target" ]; then
     count=$(find "$target" -type f | wc -l | tr -d ' ')

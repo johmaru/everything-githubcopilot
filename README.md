@@ -95,7 +95,7 @@ Copy all Copilot customizations (instructions, prompts, agents, hooks, skills) i
 ./scripts/setup-project.sh /path/to/your-project
 ```
 
-This copies `.github/` assets and `.vscode/settings.json` into the target project. Open it in VS Code and Copilot loads everything automatically.
+This copies `.github/` assets, `scripts/hooks/`, and `.vscode/settings.json` into the target project. Open it in VS Code and Copilot loads everything automatically.
 
 ---
 

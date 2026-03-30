@@ -1,7 +1,6 @@
 ---
 name: plankton-code-quality
 description: "使用Plankton进行编写时代码质量强制执行——通过钩子在每次文件编辑时自动格式化、代码检查和Claude驱动的修复。"
-origin: community
 ---
 
 # Plankton 代码质量技能
@@ -143,7 +142,7 @@ claude
 
 ## 配置参考
 
-Plankton 的 `.claude/hooks/config.json` 控制所有行为：
+Plankton 的 `.github/hooks/deterministic-hooks.json` 控制所有行为：
 
 ```json
 {

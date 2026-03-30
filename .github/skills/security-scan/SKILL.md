@@ -1,6 +1,6 @@
 ---
 name: security-scan
-description: Scan your Claude Code configuration (.claude/ directory) for security vulnerabilities, misconfigurations, and injection risks using AgentShield. Checks CLAUDE.md, settings.json, MCP servers, hooks, and agent definitions.
+description: Scan your GitHub Copilot configuration for security vulnerabilities, misconfigurations, and injection risks using AgentShield. Checks copilot instructions, settings, MCP servers, hooks, and agent definitions.
 ---
 # Security Scan Skill
 
@@ -9,7 +9,7 @@ Audit your GitHub Copilot configuration for security issues using [AgentShield](
 ## When to Activate
 
 - Setting up a new GitHub Copilot project
-- After modifying `.github/settings.json`, ``copilot-instructions.md``, or MCP configs
+- After modifying `.github/hooks/*.json`, ``copilot-instructions.md``, or MCP configs
 - Before committing configuration changes
 - When onboarding to a new repository with existing GitHub Copilot configs
 - Periodic security hygiene checks
