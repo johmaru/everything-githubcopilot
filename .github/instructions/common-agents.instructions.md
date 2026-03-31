@@ -20,8 +20,15 @@ Located in `.github/agents/`:
 | build-error-resolver | Fix build errors | When build fails |
 | e2e-runner | E2E testing | Critical user flows |
 | refactor-cleaner | Dead code cleanup | Code maintenance |
-| doc-updater | Documentation | Updating docs |
-| rust-reviewer | Rust code review | Rust projects |
+| agent-auditor | Agent file auditing | Checking agent definitions for structural issues |
+| best-practice-researcher | Research best practices | Before implementing new features |
+| code-structure-auditor | Structural integrity auditing | Detecting broken imports, dead exports, invalid JSON |
+| design-coherence-auditor | Schema/type coherence | Checking if implementation matches stated intent |
+| docs-lookup | Live documentation lookup | When answers need current docs, not memory |
+| go-reviewer | Go code review | Go projects |
+| knowledge-curator | Knowledge base maintenance | Capturing session learnings, evolving instructions |
+| python-reviewer | Python code review | Python projects |
+| typescript-reviewer | TypeScript/JS code review | TypeScript/JavaScript projects |
 
 ## Immediate Agent Usage
 
