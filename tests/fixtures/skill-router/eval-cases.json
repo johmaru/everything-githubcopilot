@@ -1,0 +1,26 @@
+[
+  {
+    "query": "Need a roadmap and plan for a multi-PR migration",
+    "expectedSkill": "blueprint"
+  },
+  {
+    "query": "Please rewrite this prompt for GitHub Copilot",
+    "expectedSkill": "prompt-optimizer"
+  },
+  {
+    "query": "Benchmark the page because it feels slow",
+    "expectedSkill": "benchmark"
+  },
+  {
+    "query": "rewrite-this-prompt-for-github-copilot",
+    "expectedSkill": "prompt-optimizer"
+  },
+  {
+    "query": "Need a multi-session blueprint and roadmap for a complex migration",
+    "expectedSkill": "blueprint"
+  },
+  {
+    "query": "Benchmark performance regression before and after this PR",
+    "expectedSkill": "benchmark"
+  }
+]

@@ -1,0 +1,21 @@
+[
+  {
+    "query": "plugin metadata ecc universal description author features",
+    "expected": { "file_path": ".opencode/index.ts", "name": "metadata" }
+  },
+  {
+    "query": "opencode hook plugin tool execute before session idle file edited",
+    "expected": { "file_path": ".opencode/plugins/ecc-hooks.ts", "name": "ECCHooksPlugin" }
+  },
+  {
+    "query": "parse yaml compliance spec scoring threshold_promote_to_hook detector steps",
+    "expected": {
+      "file_path": ".github/skills/skill-comply/scripts/parser.py",
+      "name": "parse_spec"
+    }
+  },
+  {
+    "query": "extract symbols from source with language tree sitter typescript python rust",
+    "expected": { "file_path": "rust/semantic-indexer/src/lib.rs", "name": "extract_symbols_from_source_with_language" }
+  }
+]

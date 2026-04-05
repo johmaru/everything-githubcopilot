@@ -4,6 +4,17 @@
 const db = require('./db');
 const embedding = require('./embedding');
 
+function sanitizeKnowledgeContent(content) {
+  return content
+    .replace(/(Bearer\s+)[A-Za-z0-9._-]+/gi, '$1<redacted>')
+    .replace(/\b(?:ghp|github_pat|gho|ghu|ghs|ghr)_[A-Za-z0-9_]+\b/g, '<redacted>')
+    .replace(/\bsk-[A-Za-z0-9]+\b/g, '<redacted>')
+    .replace(/\bAIza[0-9A-Za-z\-_]{20,}\b/g, '<redacted>')
+    .replace(/\b(password|passwd|token|secret|api[_-]?key)\b\s*[:=]\s*[^\s,;]+/gi, (_, keyName) => `${keyName}=<redacted>`)
+    .replace(/[A-Za-z]:\\[^\s"']+/g, '<redacted-path>')
+    .replace(/\/(Users|home)\/[^\s"']+/g, '<redacted-path>');
+}
+
 function parseArgs(argv) {
   const args = {};
   const raw = argv.slice(2);
@@ -27,6 +38,18 @@ function parseArgs(argv) {
         break;
       case '--session-id':
         args.sessionId = next;
+        i++;
+        break;
+      case '--project-id':
+        args.projectId = next;
+        i++;
+        break;
+      case '--label':
+        args.label = next;
+        i++;
+        break;
+      case '--importance':
+        args.importance = next;
         i++;
         break;
       case '--search':
@@ -73,6 +96,9 @@ async function runStore(args) {
     process.exit(1);
   }
 
+  const sanitizedContent = sanitizeKnowledgeContent(content);
+  const projectId = args.projectId || db.detectProjectId(process.cwd());
+
   const handle = db.open();
   if (!handle) {
     process.stderr.write('Error: database is not available (better-sqlite3 not installed)\n');
@@ -84,7 +110,7 @@ async function runStore(args) {
     let embedded = false;
 
     try {
-      vec = await embedding.embed(content);
+      vec = await embedding.embed(sanitizedContent);
       embedded = vec !== null;
     } catch {
       // Embedding failed — store without vector
@@ -93,9 +119,12 @@ async function runStore(args) {
     const id = db.insertKnowledge(handle, {
       source: args.source,
       kind: args.kind || 'pattern',
-      content,
+      content: sanitizedContent,
       createdAt: new Date().toISOString(),
       sessionId: args.sessionId || null,
+      projectId,
+      label: args.label || null,
+      importance: args.importance,
       embedding: vec,
     });
 
@@ -108,6 +137,8 @@ async function runStore(args) {
 async function runSearch(args) {
   const query = args.search;
   const limit = args.limit || 5;
+  const sanitizedQuery = sanitizeKnowledgeContent(query);
+  const projectId = args.projectId || db.detectProjectId(process.cwd());
 
   const handle = db.open();
   if (!handle) {
@@ -119,15 +150,15 @@ async function runSearch(args) {
     let results = [];
 
     if (db.isVecAvailable()) {
-      const vec = await embedding.embed(query);
+      const vec = await embedding.embed(sanitizedQuery);
       if (vec) {
-        results = db.searchKnowledge(handle, vec, limit);
+        results = db.searchKnowledge(handle, vec, limit, { projectId });
       }
     }
 
     // Fall back to keyword search if vector search returned nothing
     if (results.length === 0) {
-      results = db.searchKnowledgeByKeyword(handle, query, limit);
+      results = db.searchKnowledgeByKeyword(handle, sanitizedQuery, limit, { projectId });
     }
 
     process.stdout.write(JSON.stringify(results) + '\n');

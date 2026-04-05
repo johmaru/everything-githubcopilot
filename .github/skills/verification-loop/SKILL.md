@@ -1,124 +1,44 @@
 ---
 name: verification-loop
-description: "A comprehensive verification system for Claude Code sessions."
+description: >
+  コード変更後や /verify 実行時の validation, test, lint, regression 用の強制検証ループ。
+  実装タスクで自動適用し、変更セットの再検証にも使う。
 ---
-# Verification Loop Skill
 
-A comprehensive verification system for GitHub Copilot sessions.
+# 強制検証ループ
 
-## When to Use
+## ルール
+コード変更後、「完了」報告前に必ず実行:
 
-Invoke this skill:
-- After completing a feature or significant code change
-- Before creating a PR
-- When you want to ensure quality gates pass
-- After refactoring
+1. 保存確認: `#read/readFile` で変更反映を確認
+2. 構文チェック: `#read/problems` でエラー・警告を確認
+3. 狭い検証: 変更面ごとに最小の確認コマンドを先に実行
+4. テスト実行: `#execute/runInTerminal` で関連テストをパス
+5. 回帰チェック: 関連テストが壊れていないか確認
 
-## Verification Phases
+## checklist enforcement
+- `todo` / `todo_write` / `manage_todo_list` が未使用なら checklist 状態は `neutral`
+- checklist を使った session で未完了タスクが残る場合は `blocked` とし、完了報告ではなく follow-up と次の一手を返す
+- checklist を使った session で未完了タスクが 0 件なら `pass`
 
-### Phase 1: Build Verification
-```bash
-# Check if project builds
-npm run build 2>&1 | tail -20
-# OR
-pnpm build 2>&1 | tail -20
-```
+## この repository の既定コマンド
+- prompt / agent / instruction / skill 変更: `node scripts/ci/validate-copilot-customizations.js`
+- hook / schema 変更: `node scripts/ci/validate-github-hooks.js`
+- 個人パス混入確認: `node scripts/ci/validate-no-personal-paths.js`
+- Markdown 変更: `npx markdownlint <touched files>`
+- 全体確認: `npm test` と `npm run lint`
 
-If build fails, STOP and fix before continuing.
+## 適用の目安
+- `.github/` 配下や `README.md` を触ったら、まず validator と markdownlint を実行し、/verify では最終的に `npm test` と `npm run lint` まで広げる
+- `scripts/` や `tests/` を触ったら、最終確認で `npm test` を省略しない
 
-### Phase 2: Type Check
-```bash
-# TypeScript projects
-npx tsc --noEmit 2>&1 | head -30
+## /verify での既定
+- 現在の変更セットを対象に、保存確認、diagnostics、関連テスト、広い回帰確認を順に報告する
+- checklist の結果も `neutral` / `blocked` / `pass` で報告する
+- 明示的な修正依頼がない限り編集せず、`✅` / `❌` と次の推奨アクションを付けて報告する
 
-# Python projects
-pyright . 2>&1 | head -30
-```
-
-Report all type errors. Fix critical ones before continuing.
-
-### Phase 3: Lint Check
-```bash
-# JavaScript/TypeScript
-npm run lint 2>&1 | head -30
-
-# Python
-ruff check . 2>&1 | head -30
-```
-
-### Phase 4: Test Suite
-```bash
-# Run tests with coverage
-npm run test -- --coverage 2>&1 | tail -50
-
-# Check coverage threshold
-# Target: 80% minimum
-```
-
-Report:
-- Total tests: X
-- Passed: X
-- Failed: X
-- Coverage: X%
-
-### Phase 5: Security Scan
-```bash
-# Check for secrets
-grep -rn "sk-" --include="*.ts" --include="*.js" . 2>/dev/null | head -10
-grep -rn "api_key" --include="*.ts" --include="*.js" . 2>/dev/null | head -10
-
-# Check for console.log
-grep -rn "console.log" --include="*.ts" --include="*.tsx" src/ 2>/dev/null | head -10
-```
-
-### Phase 6: Diff Review
-```bash
-# Show what changed
-git diff --stat
-git diff HEAD~1 --name-only
-```
-
-Review each changed file for:
-- Unintended changes
-- Missing error handling
-- Potential edge cases
-
-## Output Format
-
-After running all phases, produce a verification report:
-
-```
-VERIFICATION REPORT
-==================
-
-Build:     [PASS/FAIL]
-Types:     [PASS/FAIL] (X errors)
-Lint:      [PASS/FAIL] (X warnings)
-Tests:     [PASS/FAIL] (X/Y passed, Z% coverage)
-Security:  [PASS/FAIL] (X issues)
-Diff:      [X files changed]
-
-Overall:   [READY/NOT READY] for PR
-
-Issues to Fix:
-1. ...
-2. ...
-```
-
-## Continuous Mode
-
-For long sessions, run verification every 15 minutes or after major changes:
-
-```markdown
-Set a mental checkpoint:
-- After completing each function
-- After finishing a component
-- Before moving to next task
-
-Run: /verify
-```
-
-## Integration with Hooks
-
-This skill complements PostToolUse hooks but provides deeper verification.
-Hooks catch issues immediately; this skill provides comprehensive review.
+## 失敗時
+- 実装タスクでのテスト失敗 → 修正3回まで試行
+- 読み取り専用の検証タスクでは修正せず、失敗内容と次の一手を報告
+- 実装タスクで3回失敗 → plannerにハンドオフ
+- 実装タスクでの構文エラー → 即修正（回数カウント外）

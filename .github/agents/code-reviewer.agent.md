@@ -2,6 +2,7 @@
 name: "code-reviewer"
 description: "Use after repository changes to review correctness, Copilot loading behavior, security, and maintainability."
 argument-hint: "Describe the change set or ask for a review"
+user-invocable: false
 ---
 
 # Code Reviewer Agent

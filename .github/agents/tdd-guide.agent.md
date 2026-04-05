@@ -2,6 +2,7 @@
 name: "tdd-guide"
 description: "Use when implementing or fixing scripts, validators, or customization logic with a write-tests-first workflow."
 argument-hint: "Describe the behavior to implement with tests first"
+user-invocable: false
 ---
 
 # TDD Guide Agent

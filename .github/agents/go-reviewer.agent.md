@@ -2,6 +2,7 @@
 name: "go-reviewer"
 description: "Use when reviewing Go changes for idiomatic patterns, concurrency safety, error handling, and security."
 argument-hint: "Describe the Go change set to review"
+user-invocable: false
 ---
 
 # Go Reviewer Agent

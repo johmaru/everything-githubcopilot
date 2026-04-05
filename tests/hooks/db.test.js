@@ -49,9 +49,12 @@ const SCHEMA_SQL = `
   CREATE TABLE IF NOT EXISTS pending_tasks (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     session_id TEXT NOT NULL REFERENCES sessions(id),
+    project_id TEXT,
+    task_key TEXT,
     description TEXT NOT NULL,
     status TEXT NOT NULL DEFAULT 'pending',
-    created_at TEXT NOT NULL
+    created_at TEXT NOT NULL,
+    updated_at TEXT
   );
 
   CREATE TABLE IF NOT EXISTS knowledge (
@@ -62,7 +65,14 @@ const SCHEMA_SQL = `
     created_at TEXT NOT NULL,
     session_id TEXT,
     project_id TEXT,
+    label TEXT,
+    importance TEXT NOT NULL DEFAULT 'medium',
     confidence REAL NOT NULL DEFAULT 0.5
+  );
+
+  CREATE TABLE IF NOT EXISTS knowledge_vec_map (
+    knowledge_id INTEGER PRIMARY KEY REFERENCES knowledge(id),
+    vec_rowid INTEGER NOT NULL UNIQUE
   );
 
   CREATE TABLE IF NOT EXISTS observations (
@@ -81,6 +91,9 @@ const SCHEMA_SQL = `
 
   CREATE INDEX IF NOT EXISTS idx_pending_status
     ON pending_tasks(status, created_at DESC);
+
+  CREATE INDEX IF NOT EXISTS idx_pending_project_status
+    ON pending_tasks(project_id, status, updated_at DESC, created_at DESC);
 
   CREATE INDEX IF NOT EXISTS idx_session_files_session
     ON session_files(session_id);
@@ -220,6 +233,32 @@ results.push(
   })
 );
 
+results.push(
+  test('upsertSession updates an existing session when startedAt is omitted', () => {
+    const handle = createPlainTestDb();
+
+    db.upsertSession(handle, {
+      id: 'sess-2b',
+      startedAt: '2026-03-30T09:45:00Z',
+      branch: 'feature-a',
+      summary: 'Original summary',
+    });
+
+    db.upsertSession(handle, {
+      id: 'sess-2b',
+      branch: 'feature-b',
+      summary: 'Updated summary',
+    });
+
+    const row = handle.prepare('SELECT * FROM sessions WHERE id = ?').get('sess-2b');
+    assert.ok(row);
+    assert.strictEqual(row.started_at, '2026-03-30T09:45:00Z', 'started_at should be preserved when omitted on update');
+    assert.strictEqual(row.branch, 'feature-b', 'branch should be updated');
+    assert.strictEqual(row.summary, 'Updated summary', 'summary should be updated');
+    handle.close();
+  })
+);
+
 // 5. insertSessionFiles inserts multiple file records in one transaction
 results.push(
   test('insertSessionFiles inserts multiple file records in one transaction', () => {
@@ -317,6 +356,207 @@ results.push(
   })
 );
 
+results.push(
+  test('upsertPendingTask inserts a new project-scoped active task', () => {
+    const handle = createPlainTestDb();
+
+    db.upsertSession(handle, {
+      id: 'sess-active-1',
+      startedAt: '2026-04-04T09:00:00Z',
+      projectId: 'proj-active',
+    });
+
+    const rowId = db.upsertPendingTask(handle, {
+      sessionId: 'sess-active-1',
+      projectId: 'proj-active',
+      taskKey: 'task-1',
+      description: 'Inspect hook payload',
+      status: 'in-progress',
+      createdAt: '2026-04-04T09:01:00Z',
+      updatedAt: '2026-04-04T09:01:30Z',
+    });
+
+    const row = handle.prepare('SELECT * FROM pending_tasks WHERE id = ?').get(rowId);
+    assert.ok(row, 'active task row should exist');
+    assert.strictEqual(row.project_id, 'proj-active');
+    assert.strictEqual(row.task_key, 'task-1');
+    assert.strictEqual(row.description, 'Inspect hook payload');
+    assert.strictEqual(row.status, 'in-progress');
+    assert.strictEqual(row.updated_at, '2026-04-04T09:01:30Z');
+    handle.close();
+  })
+);
+
+results.push(
+  test('upsertPendingTask updates an existing task instead of duplicating it', () => {
+    const handle = createPlainTestDb();
+
+    db.upsertSession(handle, {
+      id: 'sess-active-2',
+      startedAt: '2026-04-04T09:10:00Z',
+      projectId: 'proj-active',
+    });
+
+    const firstId = db.upsertPendingTask(handle, {
+      sessionId: 'sess-active-2',
+      projectId: 'proj-active',
+      taskKey: 'task-2',
+      description: 'Read hooks',
+      status: 'pending',
+      createdAt: '2026-04-04T09:11:00Z',
+      updatedAt: '2026-04-04T09:11:00Z',
+    });
+
+    const secondId = db.upsertPendingTask(handle, {
+      sessionId: 'sess-active-2b',
+      projectId: 'proj-active',
+      taskKey: 'task-2',
+      description: 'Read hook payloads carefully',
+      status: 'in-progress',
+      createdAt: '2026-04-04T09:12:00Z',
+      updatedAt: '2026-04-04T09:12:30Z',
+    });
+
+    const rows = handle.prepare('SELECT * FROM pending_tasks WHERE project_id = ? AND task_key = ?').all('proj-active', 'task-2');
+    assert.strictEqual(firstId, secondId, 'upsert should return the same row id');
+    assert.strictEqual(rows.length, 1, 'should keep a single task row');
+    assert.strictEqual(rows[0].session_id, 'sess-active-2b', 'latest session id should be retained');
+    assert.strictEqual(rows[0].description, 'Read hook payloads carefully');
+    assert.strictEqual(rows[0].status, 'in-progress');
+    assert.strictEqual(rows[0].created_at, '2026-04-04T09:11:00Z', 'created_at should preserve the first seen time');
+    assert.strictEqual(rows[0].updated_at, '2026-04-04T09:12:30Z');
+    handle.close();
+  })
+);
+
+results.push(
+  test('upsertPendingTask can complete a task and active queries exclude it', () => {
+    const handle = createPlainTestDb();
+
+    db.upsertSession(handle, {
+      id: 'sess-active-3',
+      startedAt: '2026-04-04T09:20:00Z',
+      projectId: 'proj-active',
+    });
+
+    db.upsertPendingTask(handle, {
+      sessionId: 'sess-active-3',
+      projectId: 'proj-active',
+      taskKey: 'task-3',
+      description: 'Implement sync',
+      status: 'in-progress',
+      createdAt: '2026-04-04T09:21:00Z',
+      updatedAt: '2026-04-04T09:21:00Z',
+    });
+
+    db.upsertPendingTask(handle, {
+      sessionId: 'sess-active-3',
+      projectId: 'proj-active',
+      taskKey: 'task-3',
+      description: 'Implement sync',
+      status: 'completed',
+      createdAt: '2026-04-04T09:22:00Z',
+      updatedAt: '2026-04-04T09:22:00Z',
+    });
+
+    const activeTasks = db.getPendingTasks(handle, { projectId: 'proj-active' });
+    const storedRow = handle.prepare('SELECT status FROM pending_tasks WHERE project_id = ? AND task_key = ?').get('proj-active', 'task-3');
+    assert.strictEqual(storedRow.status, 'completed');
+    assert.ok(!activeTasks.some((task) => task.description === 'Implement sync'), 'completed task should not be returned as active');
+    handle.close();
+  })
+);
+
+results.push(
+  test('upsertPendingTask reuses legacy rows that do not have a project_id yet', () => {
+    const handle = createPlainTestDb();
+
+    db.upsertSession(handle, {
+      id: 'sess-legacy',
+      startedAt: '2026-04-04T09:30:00Z',
+      projectId: 'proj-active',
+    });
+
+    handle.prepare(`
+      INSERT INTO pending_tasks (session_id, project_id, task_key, description, status, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?)
+    `).run(
+      'sess-legacy',
+      null,
+      'legacy-task',
+      'Carry legacy task forward',
+      'pending',
+      '2026-04-04T09:31:00Z',
+      '2026-04-04T09:31:00Z'
+    );
+
+    const rowId = db.upsertPendingTask(handle, {
+      sessionId: 'sess-legacy',
+      projectId: 'proj-active',
+      taskKey: 'legacy-task',
+      description: 'Carry legacy task forward',
+      status: 'in-progress',
+      createdAt: '2026-04-04T09:32:00Z',
+      updatedAt: '2026-04-04T09:33:00Z',
+    });
+
+    const rows = handle.prepare('SELECT * FROM pending_tasks WHERE task_key = ?').all('legacy-task');
+    assert.strictEqual(rows.length, 1, 'legacy row should be updated in place');
+    assert.strictEqual(rows[0].id, rowId);
+    assert.strictEqual(rows[0].project_id, 'proj-active');
+    assert.strictEqual(rows[0].status, 'in-progress');
+    handle.close();
+  })
+);
+
+results.push(
+  test('upsertPendingTask does not reuse ambiguous legacy rows', () => {
+    const handle = createPlainTestDb();
+
+    db.upsertSession(handle, {
+      id: 'sess-legacy-1',
+      startedAt: '2026-04-04T09:39:00Z',
+      projectId: 'proj-active',
+    });
+    db.upsertSession(handle, {
+      id: 'sess-legacy-2',
+      startedAt: '2026-04-04T09:39:30Z',
+      projectId: 'proj-active',
+    });
+    db.upsertSession(handle, {
+      id: 'sess-legacy-ambiguous',
+      startedAt: '2026-04-04T09:40:00Z',
+      projectId: 'proj-active',
+    });
+
+    handle.prepare(`
+      INSERT INTO pending_tasks (session_id, project_id, task_key, description, status, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?)
+    `).run('sess-legacy-1', null, 'shared-task', 'Old task A', 'pending', '2026-04-04T09:41:00Z', '2026-04-04T09:41:00Z');
+    handle.prepare(`
+      INSERT INTO pending_tasks (session_id, project_id, task_key, description, status, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?)
+    `).run('sess-legacy-2', null, 'shared-task', 'Old task B', 'pending', '2026-04-04T09:42:00Z', '2026-04-04T09:42:00Z');
+
+    const rowId = db.upsertPendingTask(handle, {
+      sessionId: 'sess-legacy-ambiguous',
+      projectId: 'proj-active',
+      taskKey: 'shared-task',
+      description: 'Current task',
+      status: 'in-progress',
+      createdAt: '2026-04-04T09:43:00Z',
+      updatedAt: '2026-04-04T09:43:00Z',
+    });
+
+    const rows = handle.prepare('SELECT id, project_id, description FROM pending_tasks WHERE task_key = ? ORDER BY created_at ASC').all('shared-task');
+    assert.strictEqual(rows.length, 3, 'ambiguous legacy rows should be preserved and a new row should be added');
+    assert.strictEqual(rows[2].id, rowId);
+    assert.strictEqual(rows[2].project_id, 'proj-active');
+    assert.strictEqual(rows[2].description, 'Current task');
+    handle.close();
+  })
+);
+
 // 8. getPendingTasks returns only pending tasks, ordered by created_at DESC, limited to 20
 results.push(
   test('getPendingTasks returns only pending tasks ordered by created_at DESC, max 20', () => {
@@ -361,6 +601,358 @@ results.push(
   })
 );
 
+results.push(
+  test('getPendingTasks scopes results to the current project and keeps in-progress tasks', () => {
+    const handle = createPlainTestDb();
+
+    db.upsertSession(handle, { id: 'sess-pa', startedAt: '2026-04-04T10:00:00Z', projectId: 'proj-A' });
+    db.upsertSession(handle, { id: 'sess-pb', startedAt: '2026-04-04T10:00:00Z', projectId: 'proj-B' });
+    db.upsertSession(handle, { id: 'sess-pb-legacy', startedAt: '2026-04-04T10:00:00Z', projectId: 'proj-B' });
+
+    db.upsertPendingTask(handle, {
+      sessionId: 'sess-pa',
+      projectId: 'proj-A',
+      taskKey: 'a-1',
+      description: 'Project A pending',
+      status: 'pending',
+      createdAt: '2026-04-04T10:01:00Z',
+      updatedAt: '2026-04-04T10:01:00Z',
+    });
+    db.upsertPendingTask(handle, {
+      sessionId: 'sess-pa',
+      projectId: 'proj-A',
+      taskKey: 'a-2',
+      description: 'Project A in progress',
+      status: 'in-progress',
+      createdAt: '2026-04-04T10:02:00Z',
+      updatedAt: '2026-04-04T10:03:00Z',
+    });
+    db.upsertPendingTask(handle, {
+      sessionId: 'sess-pb',
+      projectId: 'proj-B',
+      taskKey: 'b-1',
+      description: 'Project B pending',
+      status: 'pending',
+      createdAt: '2026-04-04T10:04:00Z',
+      updatedAt: '2026-04-04T10:04:00Z',
+    });
+    handle.prepare(`
+      INSERT INTO pending_tasks (session_id, project_id, task_key, description, status, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?)
+    `).run('sess-pb-legacy', null, 'legacy-b', 'Legacy Project B task', 'pending', '2026-04-04T10:05:00Z', '2026-04-04T10:05:00Z');
+
+    const scoped = db.getPendingTasks(handle, { projectId: 'proj-A' });
+    assert.strictEqual(scoped.length, 2, 'should only return active tasks from proj-A');
+    assert.ok(scoped.every((row) => row.project_id === 'proj-A'), 'should exclude other projects');
+    assert.ok(scoped.some((row) => row.status === 'in-progress'), 'in-progress tasks should be visible');
+    assert.ok(!scoped.some((row) => row.description === 'Project B pending'), 'cross-project tasks should be excluded');
+    assert.ok(!scoped.some((row) => row.description === 'Legacy Project B task'), 'legacy null-project rows from other projects should be excluded');
+    handle.close();
+  })
+);
+
+results.push(
+  test('countPendingTasks returns the total active task count for the current project', () => {
+    const handle = createPlainTestDb();
+
+    db.upsertSession(handle, { id: 'sess-count-a', startedAt: '2026-04-04T11:00:00Z', projectId: 'proj-A' });
+    db.upsertSession(handle, { id: 'sess-count-b', startedAt: '2026-04-04T11:00:00Z', projectId: 'proj-B' });
+
+    for (let index = 1; index <= 22; index += 1) {
+      db.upsertPendingTask(handle, {
+        sessionId: 'sess-count-a',
+        projectId: 'proj-A',
+        taskKey: `a-${index}`,
+        description: `Project A task ${index}`,
+        status: index % 2 === 0 ? 'in-progress' : 'pending',
+        createdAt: `2026-04-04T11:${String(index).padStart(2, '0')}:00Z`,
+        updatedAt: `2026-04-04T11:${String(index).padStart(2, '0')}:30Z`,
+      });
+    }
+
+    db.upsertPendingTask(handle, {
+      sessionId: 'sess-count-a',
+      projectId: 'proj-A',
+      taskKey: 'a-complete',
+      description: 'Project A done',
+      status: 'completed',
+      createdAt: '2026-04-04T11:30:00Z',
+      updatedAt: '2026-04-04T11:30:30Z',
+    });
+
+    db.upsertPendingTask(handle, {
+      sessionId: 'sess-count-b',
+      projectId: 'proj-B',
+      taskKey: 'b-1',
+      description: 'Project B pending',
+      status: 'pending',
+      createdAt: '2026-04-04T11:31:00Z',
+      updatedAt: '2026-04-04T11:31:30Z',
+    });
+
+    const total = db.countPendingTasks(handle, { projectId: 'proj-A' });
+    const displayed = db.getPendingTasks(handle, { projectId: 'proj-A' });
+
+    assert.strictEqual(total, 22, 'total count should include all active project tasks, not only the first page');
+    assert.strictEqual(displayed.length, 20, 'display list should still respect the default limit');
+    handle.close();
+  })
+);
+
+results.push(
+  test('unknown task statuses are stored but excluded from active task queries and counts', () => {
+    const handle = createPlainTestDb();
+
+    db.upsertSession(handle, { id: 'sess-count-unknown', startedAt: '2026-04-04T11:40:00Z', projectId: 'proj-A' });
+
+    db.upsertPendingTask(handle, {
+      sessionId: 'sess-count-unknown',
+      projectId: 'proj-A',
+      taskKey: 'blocked-1',
+      description: 'Blocked task',
+      status: 'blocked',
+      createdAt: '2026-04-04T11:41:00Z',
+      updatedAt: '2026-04-04T11:41:30Z',
+    });
+
+    const stored = handle.prepare('SELECT status FROM pending_tasks WHERE task_key = ?').get('blocked-1');
+    const total = db.countPendingTasks(handle, { projectId: 'proj-A' });
+    const displayed = db.getPendingTasks(handle, { projectId: 'proj-A' });
+
+    assert.strictEqual(stored.status, 'blocked', 'unknown statuses should be preserved for later interpretation');
+    assert.strictEqual(total, 0, 'unknown statuses should not inflate active task counts');
+    assert.strictEqual(displayed.length, 0, 'unknown statuses should not appear in active task listings');
+    handle.close();
+  })
+);
+
+results.push(
+  test('getVerificationCompletionState returns neutral when the session never used a todo tool', () => {
+    const handle = createPlainTestDb();
+
+    db.upsertSession(handle, {
+      id: 'sess-verify-neutral',
+      startedAt: '2026-04-05T09:00:00Z',
+      projectId: 'proj-verify',
+    });
+
+    const state = db.getVerificationCompletionState(handle, {
+      sessionId: 'sess-verify-neutral',
+      projectId: 'proj-verify',
+    });
+
+    assert.deepStrictEqual(state, {
+      status: 'neutral',
+      todoToolUsed: false,
+      incompleteCount: 0,
+      incompleteTasks: [],
+      blockReason: null,
+    });
+    handle.close();
+  })
+);
+
+results.push(
+  test('getVerificationCompletionState ignores failed todo-tool observations', () => {
+    const handle = createPlainTestDb();
+
+    db.upsertSession(handle, {
+      id: 'sess-verify-failed-observation',
+      startedAt: '2026-04-05T09:02:00Z',
+      projectId: 'proj-verify',
+    });
+
+    handle.prepare(`
+      INSERT INTO observations (session_id, project_id, tool_name, tool_input, tool_output, event_type, created_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?)
+    `).run(
+      'sess-verify-failed-observation',
+      'proj-verify',
+      'manage_todo_list',
+      '{}',
+      '{}',
+      'tool_correction_dry_run',
+      '2026-04-05T09:02:30Z'
+    );
+
+    const state = db.getVerificationCompletionState(handle, {
+      sessionId: 'sess-verify-failed-observation',
+      projectId: 'proj-verify',
+    });
+
+    assert.deepStrictEqual(state, {
+      status: 'neutral',
+      todoToolUsed: false,
+      incompleteCount: 0,
+      incompleteTasks: [],
+      blockReason: null,
+    });
+    handle.close();
+  })
+);
+
+results.push(
+  test('getVerificationCompletionState returns block when the session used todo and still has incomplete tasks', () => {
+    const handle = createPlainTestDb();
+
+    db.upsertSession(handle, {
+      id: 'sess-verify-block',
+      startedAt: '2026-04-05T09:05:00Z',
+      projectId: 'proj-verify',
+    });
+
+    handle.prepare(`
+      INSERT INTO observations (session_id, project_id, tool_name, tool_input, tool_output, event_type, created_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?)
+    `).run(
+      'sess-verify-block',
+      'proj-verify',
+      'manage_todo_list',
+      '{}',
+      '{}',
+      'tool_complete',
+      '2026-04-05T09:05:30Z'
+    );
+
+    db.upsertPendingTask(handle, {
+      sessionId: 'sess-verify-block',
+      projectId: 'proj-verify',
+      taskKey: 'verify-block-1',
+      description: 'Finish checklist gate',
+      status: 'in-progress',
+      createdAt: '2026-04-05T09:06:00Z',
+      updatedAt: '2026-04-05T09:06:30Z',
+    });
+
+    const state = db.getVerificationCompletionState(handle, {
+      sessionId: 'sess-verify-block',
+      projectId: 'proj-verify',
+    });
+
+    assert.strictEqual(state.status, 'blocked');
+    assert.strictEqual(state.todoToolUsed, true);
+    assert.strictEqual(state.incompleteCount, 1);
+    assert.strictEqual(state.blockReason, 'incomplete_tasks');
+    assert.deepStrictEqual(state.incompleteTasks.map((task) => task.description), ['Finish checklist gate']);
+    handle.close();
+  })
+);
+
+results.push(
+  test('getVerificationCompletionState returns pass when the session used todo and all session tasks are completed', () => {
+    const handle = createPlainTestDb();
+
+    db.upsertSession(handle, {
+      id: 'sess-verify-pass',
+      startedAt: '2026-04-05T09:10:00Z',
+      projectId: 'proj-verify',
+    });
+
+    handle.prepare(`
+      INSERT INTO observations (session_id, project_id, tool_name, tool_input, tool_output, event_type, created_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?)
+    `).run(
+      'sess-verify-pass',
+      'proj-verify',
+      'todo',
+      '{}',
+      '{}',
+      'tool_complete',
+      '2026-04-05T09:10:30Z'
+    );
+
+    db.upsertPendingTask(handle, {
+      sessionId: 'sess-verify-pass',
+      projectId: 'proj-verify',
+      taskKey: 'verify-pass-1',
+      description: 'Complete checklist gate',
+      status: 'completed',
+      createdAt: '2026-04-05T09:11:00Z',
+      updatedAt: '2026-04-05T09:11:30Z',
+    });
+
+    const state = db.getVerificationCompletionState(handle, {
+      sessionId: 'sess-verify-pass',
+      projectId: 'proj-verify',
+    });
+
+    assert.deepStrictEqual(state, {
+      status: 'pass',
+      todoToolUsed: true,
+      incompleteCount: 0,
+      incompleteTasks: [],
+      blockReason: null,
+    });
+    handle.close();
+  })
+);
+
+results.push(
+  test('getVerificationCompletionState ignores incomplete tasks from other sessions in the same project', () => {
+    const handle = createPlainTestDb();
+
+    db.upsertSession(handle, {
+      id: 'sess-verify-current',
+      startedAt: '2026-04-05T09:15:00Z',
+      projectId: 'proj-verify',
+    });
+    db.upsertSession(handle, {
+      id: 'sess-verify-other',
+      startedAt: '2026-04-05T09:16:00Z',
+      projectId: 'proj-verify',
+    });
+
+    handle.prepare(`
+      INSERT INTO observations (session_id, project_id, tool_name, tool_input, tool_output, event_type, created_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?)
+    `).run(
+      'sess-verify-current',
+      'proj-verify',
+      'manage_todo_list',
+      '{}',
+      '{}',
+      'tool_complete',
+      '2026-04-05T09:15:30Z'
+    );
+
+    db.upsertPendingTask(handle, {
+      sessionId: 'sess-verify-current',
+      projectId: 'proj-verify',
+      taskKey: 'verify-current-1',
+      description: 'Current session task',
+      status: 'completed',
+      createdAt: '2026-04-05T09:16:30Z',
+      updatedAt: '2026-04-05T09:16:45Z',
+    });
+    db.upsertPendingTask(handle, {
+      sessionId: 'sess-verify-other',
+      projectId: 'proj-verify',
+      taskKey: 'verify-other-1',
+      description: 'Other session pending task',
+      status: 'pending',
+      createdAt: '2026-04-05T09:17:00Z',
+      updatedAt: '2026-04-05T09:17:15Z',
+    });
+
+    const state = db.getVerificationCompletionState(handle, {
+      sessionId: 'sess-verify-current',
+      projectId: 'proj-verify',
+    });
+
+    assert.deepStrictEqual(state, {
+      status: 'pass',
+      todoToolUsed: true,
+      incompleteCount: 0,
+      incompleteTasks: [],
+      blockReason: null,
+    });
+
+    const projectScoped = db.getPendingTasks(handle, { projectId: 'proj-verify' });
+    assert.ok(projectScoped.some((task) => task.description === 'Other session pending task'), 'project-scoped active task retrieval should remain unchanged');
+    handle.close();
+  })
+);
+
 // 9. Schema has correct indexes
 results.push(
   test('schema has correct indexes on sqlite_master', () => {
@@ -374,6 +966,7 @@ results.push(
 
     assert.ok(indexNames.includes('idx_sessions_started'), 'idx_sessions_started should exist');
     assert.ok(indexNames.includes('idx_pending_status'), 'idx_pending_status should exist');
+    assert.ok(indexNames.includes('idx_pending_project_status'), 'idx_pending_project_status should exist');
     assert.ok(indexNames.includes('idx_session_files_session'), 'idx_session_files_session should exist');
     assert.ok(indexNames.includes('idx_knowledge_kind'), 'idx_knowledge_kind should exist');
     assert.ok(indexNames.includes('idx_observations_session'), 'idx_observations_session should exist');
@@ -384,6 +977,7 @@ results.push(
     const byName = Object.fromEntries(indexes.map((i) => [i.name, i.tbl_name]));
     assert.strictEqual(byName['idx_sessions_started'], 'sessions');
     assert.strictEqual(byName['idx_pending_status'], 'pending_tasks');
+    assert.strictEqual(byName['idx_pending_project_status'], 'pending_tasks');
     assert.strictEqual(byName['idx_session_files_session'], 'session_files');
     assert.strictEqual(byName['idx_knowledge_kind'], 'knowledge');
     assert.strictEqual(byName['idx_observations_session'], 'observations');
@@ -680,9 +1274,9 @@ results.push(
   })
 );
 
-// 22. insertKnowledge with projectId and confidence
+// 22. insertKnowledge with projectId, label, importance, and confidence
 results.push(
-  test('insertKnowledge stores projectId and confidence', () => {
+  test('insertKnowledge stores projectId, label, importance, and confidence', () => {
     const handle = createPlainTestDb();
 
     const id = db.insertKnowledge(handle, {
@@ -691,20 +1285,24 @@ results.push(
       content: 'Common pattern: read_file → edit_file → run_terminal',
       createdAt: '2026-04-01T11:00:00Z',
       projectId: 'abc123def456',
+      label: 'err',
+      importance: 'high',
       confidence: 0.7,
     });
 
     const row = handle.prepare('SELECT * FROM knowledge WHERE id = ?').get(id);
     assert.ok(row);
     assert.strictEqual(row.project_id, 'abc123def456');
+    assert.strictEqual(row.label, 'err');
+    assert.strictEqual(row.importance, 'high');
     assert.strictEqual(row.confidence, 0.7);
     handle.close();
   })
 );
 
-// 23. insertKnowledge defaults confidence to 0.5 when omitted
+// 23. insertKnowledge defaults importance to medium and confidence to 0.5 when omitted
 results.push(
-  test('insertKnowledge defaults confidence to 0.5 when omitted', () => {
+  test('insertKnowledge defaults importance to medium and confidence to 0.5 when omitted', () => {
     const handle = createPlainTestDb();
 
     const id = db.insertKnowledge(handle, {
@@ -714,7 +1312,8 @@ results.push(
       createdAt: '2026-04-01T12:00:00Z',
     });
 
-    const row = handle.prepare('SELECT confidence FROM knowledge WHERE id = ?').get(id);
+    const row = handle.prepare('SELECT importance, confidence FROM knowledge WHERE id = ?').get(id);
+    assert.strictEqual(row.importance, 'medium');
     assert.strictEqual(row.confidence, 0.5);
     handle.close();
   })
@@ -737,9 +1336,9 @@ results.push(
   })
 );
 
-// 25. getAllKnowledge returns project_id and confidence columns
+// 25. getAllKnowledge returns project_id, label, importance, and confidence columns
 results.push(
-  test('getAllKnowledge returns project_id and confidence columns', () => {
+  test('getAllKnowledge returns project_id, label, importance, and confidence columns', () => {
     const handle = createPlainTestDb();
 
     db.insertKnowledge(handle, {
@@ -748,12 +1347,16 @@ results.push(
       content: 'src/index.ts edited 5 times',
       createdAt: '2026-04-01T14:00:00Z',
       projectId: 'projX',
+      label: 'err',
+      importance: 'critical',
       confidence: 0.3,
     });
 
     const all = db.getAllKnowledge(handle, 1);
     assert.strictEqual(all.length, 1);
     assert.strictEqual(all[0].project_id, 'projX');
+    assert.strictEqual(all[0].label, 'err');
+    assert.strictEqual(all[0].importance, 'critical');
     assert.strictEqual(all[0].confidence, 0.3);
     handle.close();
   })
@@ -786,10 +1389,11 @@ results.push(
     seedFilteringData(handle);
 
     const results26 = db.getProjectKnowledge(handle, { projectId: 'projAAA', minConfidence: 0.4, limit: 10 });
-    // Should include: confidence 0.8, 0.6, 0.5 from projAAA (not 0.3 or 0.2)
+    // Should include projAAA entries above threshold and may include safe global knowledge.
     assert.ok(results26.length >= 3, 'should have at least 3');
     assert.ok(results26.every((r) => r.confidence >= 0.4), 'all above minConfidence');
-    assert.ok(results26.every((r) => r.project_id === 'projAAA'), 'all from projAAA');
+    assert.ok(results26.every((r) => r.project_id === 'projAAA' || r.project_id === null), 'should stay within the project scope plus safe global knowledge');
+    assert.ok(!results26.some((r) => r.project_id === 'projBBB'), 'should exclude unrelated project knowledge');
     handle.close();
   })
 );
@@ -800,13 +1404,34 @@ results.push(
     const handle = createPlainTestDb();
     seedFilteringData(handle);
 
-    // projBBB only has 1 entry above 0.4 → fallback to cross-project
-    const results27 = db.getProjectKnowledge(handle, { projectId: 'projBBB', minConfidence: 0.4, limit: 5 });
+    // projBBB only has 1 entry above 0.4 → fallback to cross-project.
+    // Keep the limit small so the project-specific hit would be dropped by a naive global fallback.
+    const results27 = db.getProjectKnowledge(handle, { projectId: 'projBBB', minConfidence: 0.4, limit: 2 });
     assert.ok(results27.length >= 2, 'should return cross-project fallback');
     // Should include entries from other projects too
     const projects = new Set(results27.map((r) => r.project_id));
     assert.ok(projects.size > 1 || results27.some((r) => r.project_id !== 'projBBB'),
       'should include entries beyond projBBB');
+    assert.ok(results27.some((r) => r.project_id === 'projBBB' && r.content === 'Use docker compose for dev'),
+      'fallback should retain the project-specific matches that triggered the query');
+    handle.close();
+  })
+);
+
+results.push(
+  test('getProjectKnowledge fallback excludes unresolved issues from other projects', () => {
+    const handle = createPlainTestDb();
+
+    db.insertKnowledge(handle, { source: 'auto', kind: 'workflow', content: 'Project B note', createdAt: '2026-04-01T10:00:00Z', projectId: 'projBBB', confidence: 0.8 });
+    db.insertKnowledge(handle, { source: 'agent', kind: 'unresolved_issue', content: 'Project C broken auth', createdAt: '2026-04-01T10:01:00Z', projectId: 'projCCC', label: 'err', importance: 'high', confidence: 0.95 });
+    db.insertKnowledge(handle, { source: 'agent', kind: 'unresolved_issue', content: 'Legacy global broken cache', createdAt: '2026-04-01T10:01:30Z', label: 'err', importance: 'medium', confidence: 0.92 });
+    db.insertKnowledge(handle, { source: 'session', kind: 'pattern', content: 'Safe global pattern', createdAt: '2026-04-01T10:02:00Z', confidence: 0.9 });
+
+    const scoped = db.getProjectKnowledge(handle, { projectId: 'projBBB', minConfidence: 0.4, limit: 10 });
+    assert.ok(scoped.some((row) => row.content === 'Project B note'), 'should keep project knowledge');
+    assert.ok(scoped.some((row) => row.content === 'Safe global pattern'), 'should keep safe global knowledge');
+    assert.ok(!scoped.some((row) => row.content === 'Project C broken auth'), 'should exclude unresolved issues from other projects');
+    assert.ok(!scoped.some((row) => row.content === 'Legacy global broken cache'), 'should exclude unresolved issues even when older rows are global');
     handle.close();
   })
 );

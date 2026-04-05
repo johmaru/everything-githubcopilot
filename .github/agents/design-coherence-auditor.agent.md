@@ -2,6 +2,7 @@
 name: "design-coherence-auditor"
 description: "Use when checking whether a data structure, schema, or type definition actually supports its stated purpose — catches mismatches between intent (comments, docs, feature descriptions) and implementation (schema, index strategy, identifiers, cardinality)."
 argument-hint: "Describe the schema, data structure, or feature to audit, and provide or point to the stated purpose/requirements"
+user-invocable: false
 ---
 
 # Design Coherence Auditor Agent

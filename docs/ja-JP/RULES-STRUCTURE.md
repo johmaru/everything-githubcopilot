@@ -9,18 +9,18 @@
 ├── copilot-instructions.md           ← 常時有効なプロジェクト全体ガイダンス
 ├── instructions/                     ← ファイルスコープのルール
 │   ├── common-*.instructions.md      ← 全言語共通ルール（10ファイル）
-│   ├── {lang}-*.instructions.md      ← 言語別ルール（12言語 × 5カテゴリ）
+│   ├── {lang}-*.instructions.md      ← 言語別ルール（複数言語 × 5カテゴリ）
 │   ├── javascript-node.instructions.md
 │   ├── markdown-customizations.instructions.md
 │   ├── tdd-workflow-standards.instructions.md
 │   └── legacy-migration.instructions.md
-├── agents/                           ← 専門エージェント定義（14体）
-├── prompts/                          ← スラッシュワークフロー（16個）
+├── agents/                           ← 専門エージェント定義（21体、うち4体がユーザー直接呼び出し可能）
+├── prompts/                          ← スラッシュワークフロー（20個）
 ├── hooks/                            ← 決定論的フック定義
 │   └── deterministic-hooks.json
 └── skills/                           ← ドメインナレッジパッケージ（120+）
 
-scripts/hooks/                        ← フック実装スクリプト（14ファイル）
+scripts/hooks/                        ← フック実装スクリプト（23ファイル、以下は代表例）
 ├── _shared.js                        ← 共通ユーティリティ
 ├── db.js                             ← SQLite DAOレイヤー
 ├── embedding.js                      ← ベクトル埋め込みモジュール
@@ -28,12 +28,14 @@ scripts/hooks/                        ← フック実装スクリプト（14フ
 ├── session-stop.js                   ← Stopフック
 ├── pre-compact.js                    ← PreCompactフック
 ├── learn-embed.js                    ← ナレッジ学習CLI
+├── safety-backup.js                  ← 一時安全バックアップCLI
 ├── quality-gate.js                   ← 品質ゲートチェック
 ├── config-protection.js              ← 設定ファイル保護
 ├── doc-file-warning.js               ← ドキュメントパス警告
 ├── post-edit-format.js               ← 自動フォーマット
 ├── post-edit-typecheck.js            ← TypeScriptチェック
 ├── post-edit-console-warn.js         ← console.log警告
+├── observe-tool.js                   ← ツール観測ログ
 └── pre-bash-git-push-reminder.js     ← git push前確認
 ```
 
@@ -69,7 +71,7 @@ scripts/hooks/                        ← フック実装スクリプト（14フ
 | `common-security`             | セキュリティチェックリスト                         | `**/*`                                  |
 | `common-testing`              | テスト要件（TDD、80%カバレッジ）                   | `**/*`                                  |
 
-### 言語別ルール — 12言語対応
+### 言語別ルール — 11言語対応
 
 各言語に5カテゴリのルールファイルがあります：
 
@@ -98,9 +100,22 @@ scripts/hooks/                        ← フック実装スクリプト（14フ
 
 ### 概要
 
-特定の役割を持つ専門エージェントです。プロンプトやワークフローからの呼び出し、もしくは自動選択されます。
+特定の役割を持つ専門エージェントです。プロンプトやワークフロー、またはコアエージェントから明示的に呼び出されます。
 
-### 一覧（14体）
+### 一覧（21体）
+
+#### ユーザーから直接呼び出し可能なコアエージェント（4体）
+
+| エージェント | 役割                   | 使用タイミング           |
+| ------------ | ---------------------- | ------------------------ |
+| `planner`    | 実装計画               | 複雑な機能・リファクタ   |
+| `coder`      | 実装・検証             | 計画に基づく実装時       |
+| `researcher` | 深い調査・分析         | コードベース調査が必要時 |
+| `supporter`  | 安全な支援（編集なし） | 編集せずに相談したい時   |
+
+#### 内部専門エージェント（プロンプト/workflowから明示呼び出し）（17体）
+
+これらのエージェントは `user-invocable: false` が設定されており、ユーザーから直接呼び出すことはできません。代わりに、コアエージェント（planner/coder/researcher/supporter）やプロンプトファイルから必要に応じて呼び出されます。
 
 | エージェント               | 役割                   | 使用タイミング               |
 | -------------------------- | ---------------------- | ---------------------------- |
@@ -112,12 +127,15 @@ scripts/hooks/                        ← フック実装スクリプト（14フ
 | `e2e-runner`               | E2Eテスト              | クリティカルフロー検証       |
 | `go-reviewer`              | Go コードレビュー      | Go 変更時                    |
 | `knowledge-curator`        | ナレッジ蓄積           | 学習・知識管理               |
-| `planner`                  | 実装計画               | 複雑な機能・リファクタ       |
 | `python-reviewer`          | Python コードレビュー  | Python 変更時                |
 | `refactor-cleaner`         | デッドコード削除       | コードメンテナンス           |
 | `security-reviewer`        | セキュリティ分析       | コミット前                   |
+| `safety-checker`           | 編集後安全性チェック   | 高リスク編集直後             |
 | `tdd-guide`                | TDD支援                | 新機能・バグ修正             |
 | `typescript-reviewer`      | TS/JS コードレビュー   | TypeScript/JavaScript 変更時 |
+| `agent-auditor`            | エージェント定義監査   | 構造整合性チェック時         |
+| `code-structure-auditor`   | コード構造監査         | インポート・参照整合性時     |
+| `design-coherence-auditor` | 設計整合性監査         | スキーマ・型整合性時         |
 
 ### フロントマター形式
 
@@ -137,26 +155,30 @@ argument-hint: '引数の説明'
 
 `/command` 形式で呼び出す再利用可能なワークフローです。各プロンプトは通常、専門エージェントに紐づきます。
 
-### 一覧（16個）
+### 一覧（20個）
 
-| プロンプト           | エージェント             | 用途                       |
-| -------------------- | ------------------------ | -------------------------- |
-| `/plan`              | planner                  | 実装計画の作成             |
-| `/architect`         | architect                | アーキテクチャレビュー     |
-| `/tdd`               | tdd-guide                | TDDワークフロー実行        |
-| `/code-review`       | code-reviewer            | 変更セットのレビュー       |
-| `/build-fix`         | build-error-resolver     | ビルドエラーの修正         |
-| `/docs`              | docs-lookup              | ドキュメント参照           |
-| `/e2e`               | e2e-runner               | E2Eテスト生成・実行        |
-| `/refactor-clean`    | refactor-cleaner         | デッドコード削除           |
-| `/research-plan`     | best-practice-researcher | ベストプラクティス調査     |
-| `/python-review`     | python-reviewer          | Pythonレビュー             |
-| `/go-review`         | go-reviewer              | Goレビュー                 |
-| `/typescript-review` | typescript-reviewer      | TS/JSレビュー              |
-| `/learn`             | —                        | ナレッジ学習・記録         |
-| `/checkpoint`        | —                        | セッションチェックポイント |
-| `/verify`            | —                        | ナレッジ検証               |
-| `/evolve`            | —                        | ナレッジ進化               |
+| プロンプト            | エージェント             | 用途                       |
+| --------------------- | ------------------------ | -------------------------- |
+| `/plan`               | planner                  | 実装計画の作成             |
+| `/plan-and-implement` | planner                  | 計画から実装まで一括実行   |
+| `/architect`          | architect                | アーキテクチャレビュー     |
+| `/tdd`                | tdd-guide                | TDDワークフロー実行        |
+| `/code-review`        | code-reviewer            | 変更セットのレビュー       |
+| `/review`             | researcher               | 汎用レビュー               |
+| `/build-fix`          | build-error-resolver     | ビルドエラーの修正         |
+| `/fix-test`           | build-error-resolver     | テスト失敗の修正           |
+| `/docs`               | docs-lookup              | ドキュメント参照           |
+| `/e2e`                | e2e-runner               | E2Eテスト生成・実行        |
+| `/refactor-clean`     | refactor-cleaner         | デッドコード削除           |
+| `/research-plan`      | best-practice-researcher | ベストプラクティス調査     |
+| `/python-review`      | python-reviewer          | Pythonレビュー             |
+| `/go-review`          | go-reviewer              | Goレビュー                 |
+| `/typescript-review`  | typescript-reviewer      | TS/JSレビュー              |
+| `/learn`              | knowledge-curator        | ナレッジ学習・記録         |
+| `/knowledge-audit`    | knowledge-curator        | ナレッジ資産監査           |
+| `/checkpoint`         | knowledge-curator        | セッションチェックポイント |
+| `/verify`             | coder                    | 実装検証ループ             |
+| `/evolve`             | knowledge-curator        | ナレッジ進化               |
 
 ### フロントマター形式
 
@@ -192,6 +214,7 @@ argument-hint: '引数の説明'
 
 | マッチャー               | スクリプト                  | 動作                             |
 | ------------------------ | --------------------------- | -------------------------------- |
+| `*`                      | `observe-tool.js`           | ツール利用の観測ログを記録       |
 | `Edit\|Write\|MultiEdit` | `quality-gate.js`           | 品質ゲートチェック（async、30s） |
 | `Edit`                   | `post-edit-format.js`       | JS/TSファイルの自動フォーマット  |
 | `Edit`                   | `post-edit-typecheck.js`    | TypeScriptチェック               |
@@ -201,13 +224,14 @@ argument-hint: '引数の説明'
 
 | スクリプト         | 動作                                                   | タイムアウト |
 | ------------------ | ------------------------------------------------------ | ------------ |
-| `session-start.js` | 前回セッションの要約・未完了タスク・蓄積ナレッジを注入 | 5秒          |
+| `session-start.js` | 前回セッションの要約・未完了タスク・蓄積ナレッジを注入 | 60秒         |
 
 #### Stop — セッション終了時
 
-| スクリプト        | 動作                           | タイムアウト |
-| ----------------- | ------------------------------ | ------------ |
-| `session-stop.js` | セッション要約をSQLiteに永続化 | 10秒         |
+| スクリプト                 | 動作                                   | タイムアウト |
+| -------------------------- | -------------------------------------- | ------------ |
+| `session-stop.js`          | セッション要約をSQLiteに永続化         | 10秒         |
+| `safety-backup.js cleanup` | 当該セッションの一時バックアップを削除 | 10秒         |
 
 #### PreCompact — コンテキスト圧縮前
 
@@ -281,10 +305,10 @@ SessionStart ──┐
                ▼
 ┌──────────────────────────┐     ┌────────────────────┐
 │ session-start.js         │────▶│ SQLite (copilot.db) │
-│ • ensureDependencies()   │     │ • sessions          │
-│ • 前回サマリー注入       │     │ • session_files     │
-│ • 未完了タスク注入       │     │ • pending_tasks     │
-│ • 蓄積ナレッジ注入       │     │ • knowledge         │
+│ • 前回サマリー注入       │     │ • sessions          │
+│ • 未完了タスク注入       │     │ • session_files     │
+│ • 蓄積ナレッジ注入       │     │ • pending_tasks     │
+│ • 追加コンテキスト注入   │     │ • knowledge         │
 └──────────────────────────┘     │ • knowledge_vec     │
                                  └────────────────────┘
                ▲                          ▲
@@ -325,14 +349,18 @@ pre-compact.js             /learn ────────┘
 
 ```bash
 # プロジェクト単位
-yarn install
+./scripts/setup-project.sh /path/to/your-project
 
-# システムワイド
+# npm / npx で user-level install
+npm run install:user
+npx everything-githubcopilot install
+
+# ユーザー単位
 ./scripts/setup-system.sh      # Linux/Mac
 .\scripts\setup-system.ps1     # Windows
 ```
 
-`session-start.js` は初回チャット時に依存関係の自動インストールも試みます（`db.ensureDependencies()`）。
+`session-start.js` は初回チャット時に前回セッション要約と蓄積コンテキストを注入します。
 
 ---
 

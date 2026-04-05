@@ -2,6 +2,7 @@
 name: "best-practice-researcher"
 description: "Use when planning an implementation and you want to research best practices first. Fetches current documentation, analyzes community patterns, and produces a plan that incorporates researched best practices with source attribution."
 argument-hint: "Describe what you want to implement"
+user-invocable: false
 ---
 
 # Best Practice Researcher Agent

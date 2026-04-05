@@ -2,6 +2,7 @@
 name: "code-structure-auditor"
 description: "Use when auditing the structural integrity of source files — unresolved imports, broken cross-references, oversized files, dead exports, invalid JSON, and schema violations — without requiring an active build failure or recent change."
 argument-hint: "Describe the scope to audit (e.g. 'scripts/', 'all JS files', 'hooks config', or a specific file path)"
+user-invocable: false
 ---
 
 # Code Structure Auditor Agent

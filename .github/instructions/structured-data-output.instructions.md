@@ -1,4 +1,5 @@
 ---
+description: "Rules for generating structured data files safely using Python scripts instead of direct AI generation"
 applyTo: "**/*"
 ---
 # Structured Data Output Instructions

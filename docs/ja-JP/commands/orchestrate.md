@@ -9,28 +9,66 @@
 ## ワークフロータイプ
 
 ### feature
-完全な機能実装ワークフロー:
+
+完全な機能実装ワークフロー（四層エージェント）:
+
 ```
-planner -> tdd-guide -> code-reviewer -> security-reviewer
+planner -> coder -> researcher
+```
+
+または、編集せずに相談から始める場合:
+
+```
+supporter -> planner -> coder -> researcher
 ```
 
 ### bugfix
+
 バグ調査と修正ワークフロー:
+
 ```
-explorer -> tdd-guide -> code-reviewer
+coder -> researcher
 ```
 
 ### refactor
+
 安全なリファクタリングワークフロー:
+
 ```
-architect -> code-reviewer -> tdd-guide
+planner -> coder
 ```
 
 ### security
+
 セキュリティ重視のレビュー:
+
 ```
-security-reviewer -> code-reviewer -> architect
+coder -> security-reviewer
 ```
+
+## 四層エージェントアーキテクチャ
+
+本システムはForgeCodeのmuse/forge/sageパターンに基づく四層エージェントアーキテクチャを採用しています:
+
+### 実装レーン（編集あり）
+
+| エージェント | 役割                 | モデル         | ツールアクセス |
+| ------------ | -------------------- | -------------- | -------------- |
+| planner      | 戦略計画             | GPT-5.4 (Pro+) | 読み取り専用   |
+| coder        | 実装・検証           | Kimi 2.5 BYOK  | 完全アクセス   |
+| researcher   | 調査サブエージェント | GPT-5.4 mini   | 読み取り専用   |
+
+ワークフロー: **planner → (handoff) → coder → (handoff) → researcher**
+失敗時: **coder → (handoff) → planner** (再計画)
+
+### 支援レーン（編集なし・安全）
+
+| エージェント | 役割       | モデル         | ツールアクセス |
+| ------------ | ---------- | -------------- | -------------- |
+| supporter    | 安全な支援 | GPT-5.4 (Pro+) | 読み取り専用   |
+
+ワークフロー: **supporter → (handoff) → planner** (実装計画へ昇格)
+ワークフロー: **supporter → (handoff) → researcher** (深い調査)
 
 ## 実行パターン
 
@@ -49,22 +87,27 @@ security-reviewer -> code-reviewer -> architect
 ## HANDOFF: [前のエージェント] -> [次のエージェント]
 
 ### コンテキスト
+
 [実行された内容の要約]
 
 ### 発見事項
+
 [重要な発見または決定]
 
 ### 変更されたファイル
+
 [変更されたファイルのリスト]
 
 ### 未解決の質問
+
 [次のエージェントのための未解決項目]
 
 ### 推奨事項
+
 [推奨される次のステップ]
 ```
 
-## 例: 機能ワークフロー
+## 例: 機能ワークフロー（三層エージェント）
 
 ```
 /orchestrate feature "Add user authentication"
@@ -72,29 +115,34 @@ security-reviewer -> code-reviewer -> architect
 
 以下を実行します:
 
-1. **Plannerエージェント**
+1. **Plannerエージェント** (GPT-5.4, 読み取り専用)
    - 要件を分析
    - 実装計画を作成
    - 依存関係を特定
-   - 出力: `HANDOFF: planner -> tdd-guide`
+   - 出力: `HANDOFF: planner → coder`
 
-2. **TDD Guideエージェント**
+2. **Coderエージェント** (Kimi 2.5 BYOK, 完全アクセス)
    - プランナーのハンドオフを読み込む
-   - 最初にテストを記述
-   - テストに合格するように実装
-   - 出力: `HANDOFF: tdd-guide -> code-reviewer`
+   - 検証ループ（✅/❌）で実装
+   - 必要に応じてresearcherを呼び出し
+   - 出力: `HANDOFF: coder → researcher` または `HANDOFF: coder → (完了)`
 
-3. **Code Reviewerエージェント**
-   - 実装をレビュー
-   - 問題をチェック
-   - 改善を提案
-   - 出力: `HANDOFF: code-reviewer -> security-reviewer`
+3. **Researcherエージェント** (GPT-5.4 mini, 読み取り専用)
+   - 深いコードベース調査
+   - 依存関係の追跡
+   - 結果をcoderに報告
+   - 出力: 調査結果（coderに戻る）
 
-4. **Security Reviewerエージェント**
-   - セキュリティ監査
-   - 脆弱性チェック
-   - 最終承認
-   - 出力: 最終レポート
+### 検証ループ（Coderエージェント）
+
+各ステップ実装後、以下を検証:
+
+- ✅ 保存確認
+- ✅ 構文チェック
+- ✅ テスト実行
+- ✅ 回帰チェック
+
+3回失敗で `HANDOFF: coder → planner`（再計画）
 
 ## 最終レポート形式
 
@@ -103,7 +151,7 @@ ORCHESTRATION REPORT
 ====================
 Workflow: feature
 Task: Add user authentication
-Agents: planner -> tdd-guide -> code-reviewer -> security-reviewer
+Agents: planner → coder → researcher
 
 SUMMARY
 -------
@@ -111,14 +159,20 @@ SUMMARY
 
 AGENT OUTPUTS
 -------------
-Planner: [要約]
-TDD Guide: [要約]
-Code Reviewer: [要約]
-Security Reviewer: [要約]
+Planner: [計画要約]
+Coder: [実装要約、検証結果]
+Researcher: [調査結果（該当する場合）]
 
 FILES CHANGED
 -------------
 [変更されたすべてのファイルをリスト]
+
+VERIFICATION RESULTS
+--------------------
+- ✅ 保存確認
+- ✅ 構文チェック
+- ✅ テスト実行: XX/XX 成功
+- ✅ 回帰チェック
 
 TEST RESULTS
 ------------
@@ -139,18 +193,22 @@ RECOMMENDATION
 
 ```markdown
 ### 並行フェーズ
+
 同時に実行:
+
 - code-reviewer (品質)
 - security-reviewer (セキュリティ)
 - architect (設計)
 
 ### 結果のマージ
+
 出力を単一のレポートに結合
 ```
 
 ## 引数
 
 $ARGUMENTS:
+
 - `feature <説明>` - 完全な機能ワークフロー
 - `bugfix <説明>` - バグ修正ワークフロー
 - `refactor <説明>` - リファクタリングワークフロー

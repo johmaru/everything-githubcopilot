@@ -1,50 +1,21 @@
 #!/usr/bin/env bash
-# cleanup-system.sh -- Remove system-wide Copilot customizations.
-#
-# Usage:
-#   ./scripts/cleanup-system.sh
-#
-# Removes ~/.copilot/{instructions,agents,skills,prompts,hooks,scripts,schemas}
-# that were installed by setup-system.sh. Does NOT modify VS Code user
-# settings -- disable the paths manually if needed.
+# cleanup-system.sh — Bash wrapper for the user-level installer CLI.
 
 set -euo pipefail
 
-COPILOT_BASE="$HOME/.copilot"
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+CLI_PATH="$REPO_ROOT/scripts/installer/cli.js"
 
-echo "Cleaning up system-wide Copilot customizations..."
-echo "Target: $COPILOT_BASE"
-echo ""
-
-removed=0
-
-for subdir in instructions agents skills prompts hooks scripts schemas; do
-  target="$COPILOT_BASE/$subdir"
-  if [ -d "$target" ]; then
-    count=$(find "$target" -type f | wc -l | tr -d ' ')
-    rm -rf "$target"
-    echo "  Removed ~/.copilot/$subdir/ ($count files)"
-    removed=$((removed + 1))
-  else
-    echo "  Skipped ~/.copilot/$subdir/ (not found)"
-  fi
-done
-
-# Remove ~/.copilot if empty
-if [ -d "$COPILOT_BASE" ] && [ -z "$(ls -A "$COPILOT_BASE" 2>/dev/null)" ]; then
-  rmdir "$COPILOT_BASE"
-  echo "  Removed empty ~/.copilot/"
+if ! command -v node >/dev/null 2>&1; then
+  echo "node is required but was not found in PATH." >&2
+  exit 1
 fi
 
-echo ""
-if [ "$removed" -gt 0 ]; then
-  echo "Done. System-wide customizations removed."
-  echo ""
-  echo "Optional: remove these entries from your VS Code user settings.json:"
-  echo '  "chat.instructionsFilesLocations": { "~/.copilot/instructions": true }'
-  echo '  "chat.agentFilesLocations":        { "~/.copilot/agents": true }'
-  echo '  "chat.agentSkillsLocations":       { "~/.copilot/skills": true }'
-  echo '  "chat.promptFilesLocations":       { "~/.copilot/prompts": true }'
-else
-  echo "Nothing to clean up."
+if [ ! -f "$CLI_PATH" ]; then
+  echo "Installer CLI not found: $CLI_PATH" >&2
+  exit 1
 fi
+
+echo "Running user-level uninstaller"
+node "$CLI_PATH" uninstall

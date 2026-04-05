@@ -1,0 +1,81 @@
+[
+  {
+    "name": "neutral without todo tool",
+    "session": {},
+    "expected": {
+      "status": "neutral",
+      "todoToolUsed": false,
+      "incompleteCount": 0,
+      "blockReason": null
+    }
+  },
+  {
+    "name": "blocked with in-progress checklist",
+    "session": {
+      "todoTool": "todo",
+      "tasks": [
+        {
+          "taskKey": "verify-blocked-1",
+          "description": "Finish checklist gate",
+          "status": "in-progress"
+        }
+      ]
+    },
+    "expected": {
+      "status": "blocked",
+      "todoToolUsed": true,
+      "incompleteCount": 1,
+      "blockReason": "incomplete_tasks"
+    }
+  },
+  {
+    "name": "pass with completed checklist",
+    "session": {
+      "todoTool": "manage_todo_list",
+      "tasks": [
+        {
+          "taskKey": "verify-pass-1",
+          "description": "Checklist done",
+          "status": "completed"
+        }
+      ]
+    },
+    "expected": {
+      "status": "pass",
+      "todoToolUsed": true,
+      "incompleteCount": 0,
+      "blockReason": null
+    }
+  },
+  {
+    "name": "pass ignores other session pending tasks",
+    "session": {
+      "todoTool": "manage_todo_list",
+      "tasks": [
+        {
+          "taskKey": "verify-current-1",
+          "description": "Current session checklist done",
+          "status": "completed"
+        }
+      ],
+      "otherSessions": [
+        {
+          "sessionId": "verify-other-session",
+          "tasks": [
+            {
+              "taskKey": "verify-other-1",
+              "description": "Other session pending task",
+              "status": "pending"
+            }
+          ]
+        }
+      ]
+    },
+    "expected": {
+      "status": "pass",
+      "todoToolUsed": true,
+      "incompleteCount": 0,
+      "blockReason": null
+    }
+  }
+]

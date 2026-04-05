@@ -2,6 +2,7 @@
 name: "build-error-resolver"
 description: "Use when build failures, type errors, import errors, or validator breakages need minimal fixes without broader refactoring."
 argument-hint: "Describe the build failure, broken command, or validation error"
+user-invocable: false
 ---
 
 # Build Error Resolver Agent

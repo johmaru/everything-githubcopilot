@@ -2,6 +2,7 @@
 name: "docs-lookup"
 description: "Use when the user asks for current library, framework, API, or setup documentation and the answer should be based on live docs instead of memory."
 argument-hint: "Describe the library and the documentation question"
+user-invocable: false
 ---
 
 # Docs Lookup Agent

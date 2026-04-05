@@ -2,6 +2,7 @@
 name: "architect"
 description: "Use when a feature, migration, or refactor needs architecture review, trade-off analysis, or system design guidance before implementation."
 argument-hint: "Describe the feature, redesign, or architectural decision to evaluate"
+user-invocable: false
 ---
 
 # Architect Agent

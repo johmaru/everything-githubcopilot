@@ -28,7 +28,15 @@ Strategic compaction at logical boundaries:
 
 ## How It Works
 
-The `suggest-compact.js` script runs on PreToolUse (Edit/Write) and:
+In this repository today:
+
+1. The existing PreCompact hook writes `.github/sessions/compact-snapshot.md` before context window compaction
+2. SessionStart can resume from `checkpoint.md`, `compact-snapshot.md`, and prior summaries
+3. You decide when to run manual `/compact` at logical phase boundaries
+
+The repository already includes an optional reminder script, but it is not wired by default.
+
+If you enable a reminder script such as `suggest-compact.js`, it should run on PreToolUse (Edit/Write) and:
 
 1. **Tracks tool calls** — Counts tool invocations in session
 2. **Threshold detection** — Suggests at configurable threshold (default: 50 calls)
@@ -36,7 +44,12 @@ The `suggest-compact.js` script runs on PreToolUse (Edit/Write) and:
 
 ## Hook Setup
 
-Add to your VS Code settings or `.github/copilot-instructions.md`:
+Current baseline in this repository:
+
+- `PreCompact` is already wired to snapshot workspace state before compaction
+- manual `/compact` is the supported Phase 2 path
+
+Optional reminder wiring, if you choose to enable the existing reminder script:
 
 ```json
 {
@@ -44,11 +57,11 @@ Add to your VS Code settings or `.github/copilot-instructions.md`:
     "PreToolUse": [
       {
         "matcher": "Edit",
-        "hooks": [{ "type": "command", "command": "node `.github/skills/`strategic-compact/suggest-compact.js" }]
+        "hooks": [{ "type": "command", "command": "bash .github/skills/strategic-compact/suggest-compact.sh" }]
       },
       {
         "matcher": "Write",
-        "hooks": [{ "type": "command", "command": "node `.github/skills/`strategic-compact/suggest-compact.js" }]
+        "hooks": [{ "type": "command", "command": "bash .github/skills/strategic-compact/suggest-compact.sh" }]
       }
     ]
   }
@@ -58,7 +71,7 @@ Add to your VS Code settings or `.github/copilot-instructions.md`:
 ## Configuration
 
 Environment variables:
-- `COMPACT_THRESHOLD` — Tool calls before first suggestion (default: 50)
+- `COMPACT_THRESHOLD` — Tool calls before first suggestion (default: 50, only applies when the optional reminder hook is enabled)
 
 ## Compaction Decision Guide
 

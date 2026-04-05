@@ -10,6 +10,7 @@ Thanks for contributing. This repository is being migrated into a GitHub Copilot
 - [Contributing Prompts](#contributing-prompts)
 - [Contributing Agents](#contributing-agents)
 - [Contributing Hooks](#contributing-hooks)
+- [Contributing Memory And Knowledge](#contributing-memory-and-knowledge)
 - [MCP and documentation (e.g. Context7)](#mcp-and-documentation-eg-context7)
 - [Pull Request Process](#pull-request-process)
 
@@ -183,17 +184,17 @@ You are a specialist for this workflow.
 
 ### Example Agents
 
-| Agent                        | Purpose                              |
-| ---------------------------- | ------------------------------------ |
-| `planner.agent.md`           | Planning and migration decomposition |
-| `architect.agent.md`         | Architecture and trade-off analysis  |
-| `tdd-guide.agent.md`         | Test-driven implementation           |
-| `code-reviewer.agent.md`     | Review current change set            |
-| `security-reviewer.agent.md` | Security-focused review              |
-| `build-error-resolver.agent.md` | Minimal build and validator fixes |
-| `docs-lookup.agent.md` | Current docs and API lookup |
-| `e2e-runner.agent.md` | E2E workflow generation and execution |
-| `refactor-cleaner.agent.md` | Safe dead-code cleanup |
+| Agent                           | Purpose                               |
+| ------------------------------- | ------------------------------------- |
+| `planner.agent.md`              | Planning and migration decomposition  |
+| `architect.agent.md`            | Architecture and trade-off analysis   |
+| `tdd-guide.agent.md`            | Test-driven implementation            |
+| `code-reviewer.agent.md`        | Review current change set             |
+| `security-reviewer.agent.md`    | Security-focused review               |
+| `build-error-resolver.agent.md` | Minimal build and validator fixes     |
+| `docs-lookup.agent.md`          | Current docs and API lookup           |
+| `e2e-runner.agent.md`           | E2E workflow generation and execution |
+| `refactor-cleaner.agent.md`     | Safe dead-code cleanup                |
 
 ---
 
@@ -296,6 +297,26 @@ tool == "Bash" && tool_input.command matches "git push"
 
 ---
 
+## Contributing Memory And Knowledge
+
+The repository already ships a memory surface. Extend it before inventing new persistence paths.
+
+### Existing Surfaces
+
+- `.github/prompts/checkpoint.prompt.md` writes the manual resume artifact.
+- `scripts/hooks/pre-compact.js` and `scripts/hooks/session-start.js` handle compaction snapshots and session restore.
+- `scripts/hooks/db.js` persists sessions, pending tasks, and searchable project knowledge in SQLite.
+- `scripts/hooks/learn-embed.js` stores sanitized, repo-scoped knowledge for semantic retrieval.
+
+### Contribution Rules
+
+- Reuse the existing checkpoint, session, and knowledge hooks before adding new storage mechanisms.
+- Keep memory entries factual, scoped, and disposable. Durable entries should capture decisions, patterns, or unresolved issues.
+- Do not require `github.copilot.chat.tools.memory.enabled` or any hosted memory feature for core repository behavior.
+- If you change persistence behavior, update the architecture or user-facing docs and add or adjust the relevant hook tests.
+
+---
+
 ## MCP and documentation (e.g. Context7)
 
 Skills and agents can use **MCP (Model Context Protocol)** tools to pull in up-to-date data instead of relying only on training data. This is especially useful for documentation.
@@ -304,6 +325,8 @@ Skills and agents can use **MCP (Model Context Protocol)** tools to pull in up-t
 - When contributing **instructions or prompts** that depend on live docs, describe the intended MCP-assisted workflow clearly and point to Context7 as the pattern.
 - When contributing **agents** that answer docs/API questions, document the resolve -> query workflow and keep the agent scoped to documentation lookup rather than broad research.
 - Active Copilot integrations should be documented and validated explicitly.
+- Treat MCP as optional and bounded: document the no-MCP fallback and keep core workflows usable with local repository tools only.
+- Do not add repo-managed MCP installation, `.vscode/mcp.json` requirements, or validator assumptions that depend on MCP availability.
 
 ---
 

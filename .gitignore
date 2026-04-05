@@ -47,6 +47,7 @@ lerna-debug.log*
 # Build outputs
 dist/
 build/
+rust/semantic-indexer/target/
 *.tsbuildinfo
 .cache/
 
@@ -99,3 +100,8 @@ assets/images/security/badrudi-exploit.mp4
 
 # detabase files
 .github/sessions*
+
+# Project-specific files
+ARCHITECTURE.md
+PRODUCT.md
+HANDOFF.md

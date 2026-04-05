@@ -1,0 +1,84 @@
+[
+  {
+    "name": "gpt eval sample",
+    "toolName": "grep_search",
+    "modelProfile": "gpt-5.4",
+    "toolInput": {
+      "pattern": "review output",
+      "is_regexp": "true"
+    },
+    "expected": {
+      "status": "suggested",
+      "failureType": "validation_type_mismatch",
+      "correctedInput": {
+        "query": "review output",
+        "isRegexp": true
+      }
+    }
+  },
+  {
+    "name": "kimi eval sample",
+    "toolName": "runSubagent",
+    "modelProfile": "kimi-2.5",
+    "toolInput": {
+      "message": "trace dependencies",
+      "task": "collect findings"
+    },
+    "expected": {
+      "status": "suggested",
+      "failureType": "validation_alias_match",
+      "correctedInput": {
+        "prompt": "trace dependencies",
+        "description": "collect findings"
+      }
+    }
+  },
+  {
+    "name": "unknown property drop sample",
+    "toolName": "read_file",
+    "toolInput": {
+      "filePath": "README.md",
+      "startLine": 1,
+      "endLine": 20,
+      "extraField": "remove-me"
+    },
+    "expected": {
+      "status": "suggested",
+      "failureType": "validation_unknown_property",
+      "correctedInput": {
+        "filePath": "README.md",
+        "startLine": 1,
+        "endLine": 20
+      },
+      "appliedFixTypes": [
+        "drop_unknown_property"
+      ]
+    }
+  },
+  {
+    "name": "missing required file path sample",
+    "toolName": "read_file",
+    "toolInput": {
+      "startLine": 1,
+      "endLine": 20
+    },
+    "expected": {
+      "status": "blocked",
+      "failureType": "validation_missing_required",
+      "blockedReason": "missing_required_value",
+      "missingRequired": [
+        "filePath"
+      ]
+    }
+  },
+  {
+    "name": "root scalar mismatch sample",
+    "toolName": "grep_search",
+    "toolInput": false,
+    "expected": {
+      "status": "blocked",
+      "failureType": "validation_type_mismatch",
+      "blockedReason": "unsafe_type_mismatch"
+    }
+  }
+]

@@ -2,6 +2,7 @@
 name: "e2e-runner"
 description: "Use when generating, updating, or running end-to-end tests for critical user journeys with Playwright or equivalent browser automation."
 argument-hint: "Describe the user flow or E2E scenario to cover"
+user-invocable: false
 ---
 
 # E2E Runner Agent

@@ -2,6 +2,7 @@
 name: "knowledge-curator"
 description: "Use when capturing session learnings, evolving instructions or skills, verifying knowledge consistency, or maintaining the project's accumulated knowledge base."
 argument-hint: "Describe the pattern, lesson, or knowledge area to capture or review"
+user-invocable: false
 ---
 
 # Knowledge Curator Agent

@@ -40,11 +40,11 @@ npm install
 以下のファイルが GitHub Copilot によって自動検出されます:
 
 - `.github/copilot-instructions.md` — リポジトリ全体のインストラクション
-- `.github/instructions/*.instructions.md` — パス別インストラクション (69 ファイル)
-- `.github/prompts/*.prompt.md` — スラッシュワークフロー (12 プロンプト)
-- `.github/agents/*.agent.md` — カスタムエージェント (13 エージェント)
+- `.github/instructions/**/*.instructions.md` — パス別インストラクション (71 ファイル)
+- `.github/prompts/*.prompt.md` — スラッシュワークフロー (20 プロンプト)
+- `.github/agents/*.agent.md` — カスタムエージェント (21 エージェント: 4 ユーザー可視コア + 17 内部スペシャリスト)
 - `.github/hooks/deterministic-hooks.json` — 確定的フック
-- `.github/skills/` — スキル定義 (117 スキル)
+- `.github/skills/` — スキル定義 (120+ スキル)
 
 ### 4. バリデーション
 
@@ -57,7 +57,9 @@ npm run lint
 
 ## 自分のプロジェクトにインストール
 
-すべての Copilot カスタマイズ (インストラクション、プロンプト、エージェント、フック、スキル) を任意のプロジェクトにコピーします。
+すべての Copilot カスタマイズを shared project payload として任意のプロジェクトへコピーします。`.github/` 一式、`.github/workflows/`、`AGENTS.md`、`schemas/`、`scripts/ci/`、`scripts/hooks/`、`tests/fixtures/`、`rust/semantic-indexer/`、そして `.vscode/settings.json` が未作成ならその設定も同期します。既存の `.vscode/settings.json` は上書きせず、警告だけを出して保持します。
+
+runtime 依存は target project から検出できる package manager (`packageManager`, `pnpm-lock.yaml`, `yarn.lock`, `package-lock.json`, `bun.lockb` / `bun.lock`) を優先して導入し、見つからない時だけ `npm` にフォールバックします。同梱する依存は `@huggingface/transformers`, `ajv`, `better-sqlite3`, `sqlite-vec` です。
 
 ```powershell
 # Windows
@@ -71,31 +73,45 @@ npm run lint
 
 ---
 
-## システム全体にインストール
+## ユーザー単位でインストール
 
-インストラクション、エージェント、スキル、プロンプトを `~/.copilot/` にインストールし、すべての VS Code ワークスペースに適用します。
+インストラクション、エージェント、スキル、プロンプト、フック、スキーマを `~/.copilot/` にインストールし、現在のユーザーの VS Code 設定を更新して全ワークスペースから参照できるようにします。
 
-```powershell
-# Windows
-.\scripts\setup-system.ps1
+user settings では、`~/.copilot` の instructions / agents / skills / prompts / hooks の discovery を有効化し、`AGENTS.md` discovery を有効、`CLAUDE.md` discovery を無効のまま維持します。あわせて legacy `.claude` rules / hooks の discovery は明示的に無効化して、repo の shipped baseline に揃えます。
+
+### npm / npx
+
+```bash
+npm run install:user
+npm run uninstall:user
+npm run reinstall:user
 ```
 
 ```bash
-# Linux / macOS
-./scripts/setup-system.sh
+npx everything-githubcopilot install
+npx everything-githubcopilot uninstall
+npx everything-githubcopilot reinstall
 ```
 
-### アンインストール
+### Windows
 
 ```powershell
-# Windows
+.\scripts\setup-system.ps1
+.\scripts\setup-system.ps1 -Action reinstall
 .\scripts\cleanup-system.ps1
 ```
 
+### Linux / macOS
+
 ```bash
-# Linux / macOS
+./scripts/setup-system.sh install
+./scripts/setup-system.sh reinstall
 ./scripts/cleanup-system.sh
 ```
+
+アンインストール時は、インストール前の VS Code user settings の内容をそのまま復元します。`~/.copilot/` に既存の unmanaged な内容があり、installer state file が無い場合は上書きせず停止します。
+
+installer は未公開の Autopilot 設定や default approvals、allowed tools を勝手に生成しません。opt-in で扱う approval 関連設定は `github.copilot.chat.claudeAgent.allowDangerouslySkipPermissions` のみで、これも `EGCOPILOT_ENABLE_DANGEROUS_SKIP_PERMISSIONS=1` を付けて install を実行した時だけ有効になります。
 
 ---
 
@@ -104,11 +120,12 @@ npm run lint
 ```
 .github/
   copilot-instructions.md          # リポジトリ全体のガイダンス
-  instructions/                    # 69 パス別インストラクション
-  prompts/                         # 12 スラッシュワークフロー
-  agents/                          # 13 カスタムエージェント
+  instructions/                    # 71 パス別インストラクション
+  prompts/                         # 20 スラッシュワークフロー
+  agents/                          # 21 カスタムエージェント (4 ユーザー可視コア + 17 内部スペシャリスト)
   hooks/deterministic-hooks.json   # 確定的フック
-  skills/                          # 117 スキル定義
+  skills/                          # 120+ スキル定義
+  workflows/                       # CI / release workflows
 ```
 
 ---

@@ -111,6 +111,9 @@ Guidelines:
 - separate project memory from user-global memory
 - rotate or clear memory after high-risk sessions
 - keep memory narrow, factual, and disposable
+- keep durable memory on the shipped repo surfaces: `.github/sessions/` artifacts plus `.github/sessions/copilot.db`
+- use `scripts/hooks/learn-embed.js` for searchable project knowledge so secrets and personal paths are sanitized before storage
+- do not make core workflow continuity depend on hosted memory features or remote memory services
 
 Long-lived memory should help execution continuity, not accumulate uncontrolled authority.
 

@@ -2,6 +2,7 @@
 name: "python-reviewer"
 description: "Use when reviewing Python changes for security, type hints, Pythonic patterns, and error handling."
 argument-hint: "Describe the Python change set to review"
+user-invocable: false
 ---
 
 # Python Reviewer Agent

@@ -2,6 +2,7 @@
 name: "agent-auditor"
 description: "Use when auditing agent definition files for structural integrity, completeness, and logical consistency. Detects missing required fields, broken conventions, duplicate responsibilities, and incoherent descriptions."
 argument-hint: "Specify the agent file(s) or directory to audit, or 'all' to scan .github/agents/"
+user-invocable: false
 ---
 
 # Agent Auditor Agent

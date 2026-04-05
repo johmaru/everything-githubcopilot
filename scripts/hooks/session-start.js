@@ -16,10 +16,45 @@ const path = require('path');
 const crypto = require('crypto');
 const { emit, getContext, fileExists, readFile } = require('./_shared');
 const db = require('./db');
+const artifactPathsToDelete = [];
 
 const SESSIONS_DIR = path.join(process.cwd(), '.github', 'sessions');
 const SUMMARY_FILE = path.join(SESSIONS_DIR, 'latest-summary.md');
+const CHECKPOINT_FILE = path.join(SESSIONS_DIR, 'checkpoint.md');
+const COMPACT_SNAPSHOT_FILE = path.join(SESSIONS_DIR, 'compact-snapshot.md');
 const SESSION_ID_FILE = path.join(SESSIONS_DIR, '.current-session-id');
+
+function formatTaskLine(task) {
+  if (task.status === 'in-progress') {
+    return `- [~] ${task.description}`;
+  }
+
+  return `- [ ] ${task.description}`;
+}
+
+function buildArtifactSection(title, filePath) {
+  if (!fileExists(filePath)) {
+    return null;
+  }
+
+  const content = readFile(filePath);
+
+  if (!content || !content.trim()) {
+    return null;
+  }
+
+  const body = content.trim().replace(/^#\s+.*(?:\r?\n)+/, '').trim();
+  if (!body) {
+    return null;
+  }
+
+  artifactPathsToDelete.push(filePath);
+
+  return {
+    artifactName: path.basename(filePath),
+    section: `## ${title}\n\n${body}`,
+  };
+}
 
 const context = getContext();
 
@@ -33,9 +68,21 @@ try {
 }
 
 const parts = [];
+const consumedArtifacts = [];
+let activeTaskCount = 0;
+let displayedTaskCount = 0;
 
-// Ensure DB dependencies are installed (auto-install if missing)
-db.ensureDependencies();
+const checkpointSection = buildArtifactSection('Checkpoint Resume', CHECKPOINT_FILE);
+if (checkpointSection) {
+  parts.push(checkpointSection.section);
+  consumedArtifacts.push(checkpointSection.artifactName);
+}
+
+const compactSnapshotSection = buildArtifactSection('Pre-Compact Snapshot', COMPACT_SNAPSHOT_FILE);
+if (compactSnapshotSection) {
+  parts.push(compactSnapshotSection.section);
+  consumedArtifacts.push(compactSnapshotSection.artifactName);
+}
 
 // Try SQLite first, fall back to markdown
 const handle = db.open();
@@ -61,10 +108,14 @@ if (handle) {
   }
 
   // Fetch pending tasks
-  const tasks = db.getPendingTasks(handle);
+  const tasks = db.getPendingTasks(handle, { projectId });
+  displayedTaskCount = tasks.length;
+  activeTaskCount = typeof db.countPendingTasks === 'function'
+    ? db.countPendingTasks(handle, { projectId })
+    : displayedTaskCount;
   if (tasks.length > 0) {
-    const taskLines = tasks.map((t) => `- [ ] ${t.description}`);
-    parts.push(`## Pending Tasks\n\n${taskLines.join('\n')}`);
+    const taskLines = tasks.map((task) => formatTaskLine(task));
+    parts.push(`## Active Tasks\n\n${taskLines.join('\n')}`);
   }
 
   // ── Smart knowledge retrieval ──
@@ -108,9 +159,13 @@ if (handle) {
     const projectKnowledge = db.getProjectKnowledge(handle, {
       projectId,
       minConfidence: 0.4,
-      limit: 8 - knowledge.length,
+      limit: 8,
     });
     for (const k of projectKnowledge) {
+      if (knowledge.length >= 8) {
+        break;
+      }
+
       if (!seenIds.has(k.id)) {
         knowledge.push(k);
         seenIds.add(k.id);
@@ -139,6 +194,20 @@ if (parts.length === 0) {
   process.exit(0);
 }
 
+const metadataLines = [];
+if (consumedArtifacts.length > 0) {
+  metadataLines.push(`- Consumed Artifacts: ${consumedArtifacts.join(', ')}`);
+}
+metadataLines.push(`- Active Task Count: ${activeTaskCount}`);
+metadataLines.push(`- Displayed Task Count: ${displayedTaskCount}`);
+metadataLines.push(`- Active Tasks Truncated: ${activeTaskCount > displayedTaskCount}`);
+
+if (consumedArtifacts.length > 0 || activeTaskCount > 0 || displayedTaskCount > 0) {
+  const metadataSection = `## Resume Metadata\n\n${metadataLines.join('\n')}`;
+  const metadataInsertIndex = consumedArtifacts.length > 0 ? consumedArtifacts.length : 0;
+  parts.splice(metadataInsertIndex, 0, metadataSection);
+}
+
 const output = {
   hookSpecificOutput: {
     additionalContext: parts.join('\n\n'),
@@ -146,4 +215,12 @@ const output = {
 };
 
 emit(JSON.stringify(output));
+
+for (const filePath of artifactPathsToDelete) {
+  try {
+    fs.unlinkSync(filePath);
+  } catch {
+    // non-fatal — session-start should still succeed if cleanup fails
+  }
+}
 process.exit(0);

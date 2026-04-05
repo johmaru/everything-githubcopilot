@@ -33,13 +33,13 @@ function parsePayload(raw) {
   }
 }
 
-function findStringByKeys(value, keys, seen = new Set()) {
+function findStringsByKeys(value, keys, matches = [], seen = new Set()) {
   if (typeof value === 'string') {
-    return null;
+    return matches;
   }
 
   if (!value || typeof value !== 'object' || seen.has(value)) {
-    return null;
+    return matches;
   }
 
   seen.add(value);
@@ -47,28 +47,26 @@ function findStringByKeys(value, keys, seen = new Set()) {
 
   if (Array.isArray(value)) {
     for (const item of value) {
-      const match = findStringByKeys(item, keys, seen);
-      if (match) {
-        return match;
-      }
+      findStringsByKeys(item, keys, matches, seen);
     }
-    return null;
+    return matches;
   }
 
   for (const [key, entryValue] of Object.entries(value)) {
     if (typeof entryValue === 'string' && wanted.has(normalizeKey(key)) && entryValue.trim()) {
-      return entryValue.trim();
+      matches.push(entryValue.trim());
     }
   }
 
   for (const entryValue of Object.values(value)) {
-    const match = findStringByKeys(entryValue, keys, seen);
-    if (match) {
-      return match;
-    }
+    findStringsByKeys(entryValue, keys, matches, seen);
   }
 
-  return null;
+  return matches;
+}
+
+function findStringByKeys(value, keys, seen = new Set()) {
+  return findStringsByKeys(value, keys, [], seen)[0] || null;
 }
 
 function findEnvValue(keys) {
@@ -86,6 +84,37 @@ function findEnvValue(keys) {
   }
 
   return null;
+}
+
+function getUniqueStrings(values) {
+  return [...new Set(values.filter((value) => typeof value === 'string' && value.trim()).map((value) => value.trim()))];
+}
+
+function collectExplicitFilePaths(payload) {
+  if (!payload || typeof payload !== 'object') {
+    return [];
+  }
+
+  const editLists = [
+    payload.tool_input && payload.tool_input.edits,
+    payload.toolInput && payload.toolInput.edits,
+    payload.edits,
+  ];
+
+  const editMatches = editLists
+    .filter(Array.isArray)
+    .flatMap((edits) => findStringsByKeys(edits, ['filePath', 'file_path', 'targetFile', 'target_path']));
+
+  if (editMatches.length > 0) {
+    return getUniqueStrings(editMatches);
+  }
+
+  const directSources = [payload.tool_input, payload.toolInput, payload];
+  return getUniqueStrings(
+    directSources
+      .filter((source) => source && typeof source === 'object')
+      .flatMap((source) => findStringsByKeys(source, ['filePath', 'file_path', 'targetFile', 'target_path']))
+  );
 }
 
 function getContext() {
@@ -106,8 +135,17 @@ function getCommandText(context) {
 }
 
 function getFilePath(context) {
-  return findStringByKeys(context.payload, ['filePath', 'file_path', 'targetFile', 'target_path', 'path'])
-    || findEnvValue(['toolInputFilePath', 'filePath', 'file_path', 'targetFile']);
+  return getFilePaths(context)[0] || null;
+}
+
+function getFilePaths(context) {
+  const payloadMatches = collectExplicitFilePaths(context.payload);
+  if (payloadMatches.length > 0) {
+    return payloadMatches;
+  }
+
+  const envValue = findEnvValue(['toolInputFilePath', 'filePath', 'file_path', 'targetFile']);
+  return envValue ? [envValue] : [];
 }
 
 function toWorkspacePath(filePath) {
@@ -178,6 +216,7 @@ module.exports = {
   getCommandText,
   getContext,
   getFilePath,
+  getFilePaths,
   readFile,
   runLocalBin,
   toRelativeWorkspacePath,

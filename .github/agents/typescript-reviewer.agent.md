@@ -2,6 +2,7 @@
 name: "typescript-reviewer"
 description: "Use when reviewing TypeScript or JavaScript changes for type safety, async correctness, security, and idiomatic patterns."
 argument-hint: "Describe the TypeScript or JavaScript change set to review"
+user-invocable: false
 ---
 
 # TypeScript Reviewer Agent

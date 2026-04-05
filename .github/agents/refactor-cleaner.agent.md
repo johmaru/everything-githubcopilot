@@ -2,6 +2,7 @@
 name: "refactor-cleaner"
 description: "Use when identifying dead code, unused dependencies, or low-risk cleanup opportunities that should be removed safely with validation."
 argument-hint: "Describe the area to analyze for dead code or cleanup"
+user-invocable: false
 ---
 
 # Refactor Cleaner Agent

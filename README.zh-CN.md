@@ -40,11 +40,11 @@ npm install
 以下文件由 GitHub Copilot 自动发现：
 
 - `.github/copilot-instructions.md` — 仓库级指令
-- `.github/instructions/*.instructions.md` — 路径特定指令 (69 个文件)
-- `.github/prompts/*.prompt.md` — 可复用工作流 (12 个提示)
-- `.github/agents/*.agent.md` — 自定义代理 (13 个代理)
+- `.github/instructions/**/*.instructions.md` — 路径特定指令 (71 个文件)
+- `.github/prompts/*.prompt.md` — 可复用工作流 (20 个提示)
+- `.github/agents/*.agent.md` — 自定义代理 (21 个代理: 4 个用户可见核心 + 17 个内部专家)
 - `.github/hooks/deterministic-hooks.json` — 确定性钩子
-- `.github/skills/` — 技能定义 (117 个技能)
+- `.github/skills/` — 技能定义 (120+ 个技能)
 
 ### 4. 验证
 
@@ -57,7 +57,9 @@ npm run lint
 
 ## 安装到您的项目
 
-将所有 Copilot 自定义（指令、提示、代理、钩子、技能）复制到任意项目中。
+将所有 Copilot 自定义作为 shared project payload 复制到任意项目：`.github/`、`.github/workflows/`、`AGENTS.md`、`schemas/`、`scripts/ci/`、`scripts/hooks/`、`tests/fixtures/`、`rust/semantic-indexer/`，以及在目标项目尚未存在时复制 `.vscode/settings.json`。如果目标项目已经有 `.vscode/settings.json`，安装器会给出警告并保留原文件。
+
+runtime 依赖会优先跟随目标项目的 package manager (`packageManager`、`pnpm-lock.yaml`、`yarn.lock`、`package-lock.json`、`bun.lockb` / `bun.lock`)，找不到时才回退到 `npm`。当前依赖集合是 `@huggingface/transformers`、`ajv`、`better-sqlite3`、`sqlite-vec`。
 
 ```powershell
 # Windows
@@ -71,31 +73,43 @@ npm run lint
 
 ---
 
-## 系统级安装
+## 用户级安装
 
-将指令、代理、技能和提示安装到 `~/.copilot/`，应用于所有 VS Code 工作区。
+将指令、代理、技能、提示、钩子和 schema 安装到 `~/.copilot/`，并更新当前用户的 VS Code 设置，让所有工作区都能发现它们。
+
+安装器会同步仓库当前的 VS Code discovery baseline：启用 `~/.copilot` 下的 instructions / agents / skills / prompts / hooks，启用 `AGENTS.md`，保持 `CLAUDE.md` 关闭，并显式关闭 legacy `.claude` 规则与 hook 入口。
+
+### npm / npx
+
+```bash
+npm run install:user
+npm run uninstall:user
+npm run reinstall:user
+```
+
+```bash
+npx everything-githubcopilot install
+npx everything-githubcopilot uninstall
+npx everything-githubcopilot reinstall
+```
 
 ```powershell
 # Windows
 .\scripts\setup-system.ps1
-```
-
-```bash
-# Linux / macOS
-./scripts/setup-system.sh
-```
-
-### 卸载
-
-```powershell
-# Windows
+.\scripts\setup-system.ps1 -Action reinstall
 .\scripts\cleanup-system.ps1
 ```
 
 ```bash
 # Linux / macOS
+./scripts/setup-system.sh install
+./scripts/setup-system.sh reinstall
 ./scripts/cleanup-system.sh
 ```
+
+卸载时会按安装前的原始 VS Code user settings 内容精确恢复。如果 `~/.copilot/` 中已经有未受安装器管理的内容，而且没有 installer state file，安装会直接停止而不是覆盖。
+
+安装器不会擅自生成未公开的 Autopilot、默认审批或 allowed tools 设置。唯一可能写入的审批相关设置是 `github.copilot.chat.claudeAgent.allowDangerouslySkipPermissions`，而且只有在执行安装命令时显式提供 `EGCOPILOT_ENABLE_DANGEROUS_SKIP_PERMISSIONS=1` 才会启用。
 
 ---
 
@@ -104,11 +118,12 @@ npm run lint
 ```
 .github/
   copilot-instructions.md          # 仓库级指导
-  instructions/                    # 69 路径特定指令
-  prompts/                         # 12 可复用工作流
-  agents/                          # 13 自定义代理
+  instructions/                    # 71 路径特定指令
+  prompts/                         # 20 可复用工作流
+  agents/                          # 21 自定义代理 (4 个用户可见核心 + 17 个内部专家)
   hooks/deterministic-hooks.json   # 确定性钩子
-  skills/                          # 117 技能定义
+  skills/                          # 120+ 技能定义
+  workflows/                       # CI / release workflows
 ```
 
 ---

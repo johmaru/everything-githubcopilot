@@ -40,24 +40,57 @@
   "bugs": {
     "url": "https://github.com/johmaru/everything-githubcopilot/issues"
   },
+  "bin": {
+    "everything-githubcopilot": "scripts/installer/cli.js"
+  },
   "files": [
-    ".github/",
+    ".github/agents/",
+    ".github/copilot-instructions.md",
+    ".github/hooks/",
+    ".github/instructions/",
+    ".github/prompts/",
+    ".github/skills/",
+    ".github/workflows/",
     ".vscode/",
     ".codex/",
     ".opencode/",
     "AGENTS.md",
+    "rust/semantic-indexer/",
     "schemas/",
     "scripts/ci/",
+    "scripts/cleanup-system.ps1",
+    "scripts/cleanup-system.sh",
     "scripts/hooks/",
-    "docs/"
+    "scripts/installer/",
+    "scripts/setup-system.ps1",
+    "scripts/setup-system.sh",
+    "docs/",
+    "tests/fixtures/"
   ],
   "scripts": {
+    "correction:classify": "node scripts/hooks/tool-call-correction.js classify --tool read_file --input-file tests/fixtures/tool-call-correction/classify-read-file.json",
+    "correction:eval": "node scripts/hooks/tool-call-correction.js eval",
     "postinstall": "echo '\n  Everything GitHub Copilot installed.\n  Active customizations live under .github/.\n  Validate with: npm run validate\n  Docs: README.md and docs/migration-status.md\n'",
-    "lint": "eslint . && markdownlint '**/*.md' --ignore node_modules",
+    "entry-points:eval": "node scripts/hooks/codebase-entry-points.js eval --cases tests/fixtures/entry-points/eval-cases.json",
+    "entry-points:index": "node scripts/hooks/codebase-entry-points.js index",
+    "entry-points:query": "node scripts/hooks/codebase-entry-points.js query",
+    "lint": "eslint . && markdownlint \"**/*.md\" --ignore node_modules",
+    "lint:rust": "cargo fmt --manifest-path rust/semantic-indexer/Cargo.toml --all --check && cargo clippy --manifest-path rust/semantic-indexer/Cargo.toml --all-targets -- -D warnings",
+    "phase6:benchmark": "node scripts/hooks/phase6-runner.js run",
+    "rust:index": "cargo run --manifest-path rust/semantic-indexer/Cargo.toml --",
+    "skill-router:eval": "node scripts/hooks/skill-router.js eval",
+    "skill-router:eval:embeddings": "node scripts/hooks/skill-router.js eval --use-embeddings",
+    "skill-router:recommend": "node scripts/hooks/skill-router.js recommend",
+    "verification:eval": "node scripts/hooks/verification-eval.js eval",
     "validate": "node scripts/ci/validate-github-hooks.js && node scripts/ci/validate-copilot-customizations.js && node scripts/ci/validate-no-personal-paths.js",
     "test:ci": "node tests/ci/validators.test.js",
-    "test:hooks": "node tests/hooks/db.test.js",
-    "test": "npm run validate && npm run test:ci && npm run test:hooks"
+    "test:hooks": "node tests/hooks/codebase-entry-points.test.js && node tests/hooks/db.test.js && node tests/hooks/learn-embed.test.js && node tests/hooks/observe-tool.test.js && node tests/hooks/phase6-benchmark.test.js && node tests/hooks/phase6-runner.test.js && node tests/hooks/post-edit-hooks.test.js && node tests/hooks/safety-backup.test.js && node tests/hooks/session-start.test.js && node tests/hooks/shared.test.js && node tests/hooks/skill-router.test.js && node tests/hooks/skill-router-embeddings.test.js && node tests/hooks/tool-call-correction.test.js && node tests/hooks/verification-eval.test.js",
+    "test:installer": "node tests/installer/manifest.test.js && node tests/installer/cli.test.js && node tests/installer/project-setup.test.js && node tests/installer/project-bootstrap.test.js",
+    "test:rust": "cargo test --manifest-path rust/semantic-indexer/Cargo.toml",
+    "test": "npm run validate && npm run test:ci && npm run test:hooks && npm run test:installer",
+    "install:user": "node scripts/installer/cli.js install",
+    "uninstall:user": "node scripts/installer/cli.js uninstall",
+    "reinstall:user": "node scripts/installer/cli.js reinstall"
   },
   "dependencies": {
     "@huggingface/transformers": "^3.8.1",

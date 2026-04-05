@@ -15,6 +15,9 @@ const DB_DIR = path.join(process.cwd(), '.github', 'sessions');
 const DB_PATH = path.join(DB_DIR, 'copilot.db');
 const EMBEDDING_DIM = 384; // all-MiniLM-L6-v2
 const REQUIRED_DEPS = ['better-sqlite3', 'sqlite-vec'];
+const VALID_IMPORTANCE = new Set(['critical', 'high', 'medium', 'low']);
+const ACTIVE_TASK_STATUSES = ['pending', 'in-progress'];
+const TODO_TOOL_NAMES = ['todo', 'todo_write', 'manage_todo_list'];
 
 let _db = null;
 let _available = null;
@@ -192,9 +195,12 @@ function migrate(db) {
     CREATE TABLE IF NOT EXISTS pending_tasks (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       session_id TEXT NOT NULL REFERENCES sessions(id),
+      project_id TEXT,
+      task_key TEXT,
       description TEXT NOT NULL,
       status TEXT NOT NULL DEFAULT 'pending',
-      created_at TEXT NOT NULL
+      created_at TEXT NOT NULL,
+      updated_at TEXT
     );
 
     CREATE TABLE IF NOT EXISTS knowledge (
@@ -205,7 +211,14 @@ function migrate(db) {
       created_at TEXT NOT NULL,
       session_id TEXT,
       project_id TEXT,
+      label TEXT,
+      importance TEXT NOT NULL DEFAULT 'medium',
       confidence REAL NOT NULL DEFAULT 0.5
+    );
+
+    CREATE TABLE IF NOT EXISTS knowledge_vec_map (
+      knowledge_id INTEGER PRIMARY KEY REFERENCES knowledge(id),
+      vec_rowid INTEGER NOT NULL UNIQUE
     );
 
     CREATE TABLE IF NOT EXISTS observations (
@@ -239,7 +252,12 @@ function migrate(db) {
   // Safe: "duplicate column name" is silently ignored.
   const alterQueries = [
     'ALTER TABLE sessions ADD COLUMN project_id TEXT',
+    'ALTER TABLE pending_tasks ADD COLUMN project_id TEXT',
+    'ALTER TABLE pending_tasks ADD COLUMN task_key TEXT',
+    'ALTER TABLE pending_tasks ADD COLUMN updated_at TEXT',
     'ALTER TABLE knowledge ADD COLUMN project_id TEXT',
+    'ALTER TABLE knowledge ADD COLUMN label TEXT',
+    "ALTER TABLE knowledge ADD COLUMN importance TEXT NOT NULL DEFAULT 'medium'",
     'ALTER TABLE knowledge ADD COLUMN confidence REAL NOT NULL DEFAULT 0.5',
   ];
   for (const q of alterQueries) {
@@ -251,8 +269,14 @@ function migrate(db) {
     CREATE INDEX IF NOT EXISTS idx_knowledge_project
       ON knowledge(project_id, kind);
 
+    CREATE INDEX IF NOT EXISTS idx_pending_project_status
+      ON pending_tasks(project_id, status, updated_at DESC, created_at DESC);
+
     CREATE INDEX IF NOT EXISTS idx_observations_project
       ON observations(project_id, created_at DESC);
+
+    CREATE INDEX IF NOT EXISTS idx_knowledge_vec_map_rowid
+      ON knowledge_vec_map(vec_rowid);
   `);
 
   // Create virtual vector table (gracefully skips if sqlite-vec not loaded)
@@ -261,9 +285,58 @@ function migrate(db) {
       CREATE VIRTUAL TABLE IF NOT EXISTS knowledge_vec
         USING vec0(embedding float[${EMBEDDING_DIM}]);
     `);
+
+    db.exec(`
+      INSERT OR IGNORE INTO knowledge_vec_map (knowledge_id, vec_rowid)
+      SELECT k.id, v.rowid
+      FROM knowledge k
+      INNER JOIN knowledge_vec v ON v.rowid = k.id
+    `);
   } catch {
     // sqlite-vec not loaded — vector search will be unavailable
   }
+}
+
+function buildProjectScopedKnowledgeClause(projectId) {
+  if (!projectId) {
+    return {
+      clause: 'confidence >= ?',
+      params: [],
+    };
+  }
+
+  return {
+    clause: `(
+      project_id = ?
+      OR (
+        project_id IS NULL
+        AND kind != 'unresolved_issue'
+        AND COALESCE(label, '') != 'err'
+      )
+    ) AND confidence >= ?`,
+    params: [projectId],
+  };
+}
+
+function buildScopedKnowledgeFilter(alias, projectId) {
+  if (!projectId) {
+    return {
+      clause: '1 = 1',
+      params: [],
+    };
+  }
+
+  return {
+    clause: `(
+      ${alias}.project_id = ?
+      OR (
+        ${alias}.project_id IS NULL
+        AND ${alias}.kind != 'unresolved_issue'
+        AND COALESCE(${alias}.label, '') != 'err'
+      )
+    )`,
+    params: [projectId],
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -274,6 +347,11 @@ function migrate(db) {
  * Upsert a session record.
  */
 function upsertSession(db, { id, startedAt, endedAt, branch, summary, transcriptTail, projectId }) {
+  const existingSession = !startedAt
+    ? db.prepare('SELECT started_at FROM sessions WHERE id = ?').get(id)
+    : null;
+  const effectiveStartedAt = startedAt || (existingSession && existingSession.started_at) || new Date().toISOString();
+
   const stmt = db.prepare(`
     INSERT INTO sessions (id, started_at, ended_at, branch, summary, transcript_tail, project_id)
     VALUES (?, ?, ?, ?, ?, ?, ?)
@@ -285,7 +363,7 @@ function upsertSession(db, { id, startedAt, endedAt, branch, summary, transcript
       project_id = COALESCE(excluded.project_id, sessions.project_id)
   `);
 
-  stmt.run(id, startedAt, endedAt || null, branch || null, summary || null, transcriptTail || null, projectId || null);
+  stmt.run(id, effectiveStartedAt, endedAt || null, branch || null, summary || null, transcriptTail || null, projectId || null);
 }
 
 /**
@@ -308,12 +386,149 @@ function insertSessionFiles(db, sessionId, files) {
 /**
  * Insert a pending task.
  */
-function insertPendingTask(db, { sessionId, description, status, createdAt }) {
+function insertPendingTask(db, { sessionId, projectId, taskKey, description, status, createdAt, updatedAt }) {
   const stmt = db.prepare(
-    'INSERT INTO pending_tasks (session_id, description, status, created_at) VALUES (?, ?, ?, ?)'
+    'INSERT INTO pending_tasks (session_id, project_id, task_key, description, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)'
   );
 
-  stmt.run(sessionId, description, status || 'pending', createdAt);
+  stmt.run(
+    sessionId,
+    projectId || null,
+    taskKey || null,
+    description,
+    normalizeTaskStatus(status),
+    createdAt,
+    updatedAt || null
+  );
+}
+
+function normalizeTaskStatus(status) {
+  const normalized = String(status || 'pending').trim().toLowerCase();
+  const compact = normalized.replace(/[_\s]+/g, '-');
+
+  if (!compact || ['pending', 'todo', 'not-started', 'notstarted'].includes(compact)) {
+    return 'pending';
+  }
+
+  if (['in-progress', 'inprogress', 'active', 'started', 'working'].includes(compact)) {
+    return 'in-progress';
+  }
+
+  if (['completed', 'complete', 'done', 'finished', 'closed'].includes(compact)) {
+    return 'completed';
+  }
+
+  return compact || 'pending';
+}
+
+function upsertPendingTask(db, { sessionId, projectId, taskKey, description, status, createdAt, updatedAt }) {
+  const normalizedDescription = String(description || '').trim();
+  const normalizedTaskKey = String(taskKey || normalizedDescription).trim();
+  const legacyTaskKey = normalizedTaskKey.includes(':') ? normalizedTaskKey.split(':')[0] : null;
+  const normalizedStatus = normalizeTaskStatus(status);
+  const effectiveCreatedAt = createdAt || new Date().toISOString();
+  const effectiveUpdatedAt = updatedAt || effectiveCreatedAt;
+
+  if (!sessionId || !normalizedDescription || !normalizedTaskKey) {
+    throw new Error('sessionId, description, and taskKey are required');
+  }
+
+  const existingSession = db.prepare('SELECT 1 FROM sessions WHERE id = ?').get(sessionId);
+  if (!existingSession) {
+    upsertSession(db, {
+      id: sessionId,
+      startedAt: effectiveCreatedAt,
+      projectId,
+    });
+  }
+
+  let existing;
+  if (projectId) {
+    existing = db.prepare(`
+      SELECT id, created_at
+      FROM pending_tasks
+      WHERE project_id = ? AND task_key = ?
+      LIMIT 1
+    `).get(projectId, normalizedTaskKey);
+
+    if (!existing && legacyTaskKey) {
+      const currentRows = db.prepare(`
+        SELECT id, created_at, description
+        FROM pending_tasks
+        WHERE project_id = ? AND task_key = ?
+        ORDER BY created_at DESC
+      `).all(projectId, legacyTaskKey);
+
+      if (currentRows.length === 1 && currentRows[0].description === normalizedDescription) {
+        existing = currentRows[0];
+      }
+    }
+
+    if (!existing) {
+      const legacyRows = db.prepare(`
+        SELECT id, created_at, description
+        FROM pending_tasks
+        WHERE project_id IS NULL
+          AND task_key IN (?, ?)
+          AND EXISTS (
+            SELECT 1
+            FROM sessions s
+            WHERE s.id = pending_tasks.session_id
+              AND s.project_id = ?
+          )
+        ORDER BY created_at DESC
+      `).all(normalizedTaskKey, legacyTaskKey || normalizedTaskKey, projectId);
+
+      if (legacyRows.length === 1 && legacyRows[0].description === normalizedDescription) {
+        existing = legacyRows[0];
+      }
+    }
+  } else {
+    existing = db.prepare(`
+        SELECT id, created_at
+        FROM pending_tasks
+        WHERE session_id = ? AND task_key = ?
+        LIMIT 1
+      `).get(sessionId, normalizedTaskKey);
+  }
+
+  if (existing) {
+    db.prepare(`
+      UPDATE pending_tasks
+      SET session_id = ?,
+          project_id = ?,
+          task_key = ?,
+          description = ?,
+          status = ?,
+          updated_at = ?
+      WHERE id = ?
+    `).run(
+      sessionId,
+      projectId || null,
+      normalizedTaskKey,
+      normalizedDescription,
+      normalizedStatus,
+      effectiveUpdatedAt,
+      existing.id
+    );
+
+    return Number(existing.id);
+  }
+
+  const result = db.prepare(`
+    INSERT INTO pending_tasks (session_id, project_id, task_key, description, status, created_at, updated_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?)
+  `).run(
+    sessionId,
+    projectId || null,
+    normalizedTaskKey,
+    normalizedDescription,
+    normalizedStatus,
+    effectiveCreatedAt,
+    effectiveUpdatedAt
+  );
+
+  return Number(result.lastInsertRowid);
 }
 
 /**
@@ -334,16 +549,157 @@ function getRecentSessions(db, limit = 3) {
 /**
  * Fetch all pending tasks (not yet done).
  */
-function getPendingTasks(db) {
+function getPendingTasks(db, { projectId, limit = 20, statuses = ACTIVE_TASK_STATUSES } = {}) {
+  const normalizedStatuses = statuses.map((status) => normalizeTaskStatus(status));
+  const placeholders = normalizedStatuses.map(() => '?').join(', ');
+  const params = [];
+  let scopeClause = '';
+
+  if (projectId) {
+    scopeClause = `AND (
+      pt.project_id = ?
+      OR (
+        pt.project_id IS NULL
+        AND EXISTS (
+          SELECT 1
+          FROM sessions s
+          WHERE s.id = pt.session_id
+            AND s.project_id = ?
+        )
+      )
+    )`;
+    params.push(projectId, projectId);
+  }
+
   const stmt = db.prepare(`
-    SELECT pt.id, pt.session_id, pt.description, pt.status, pt.created_at
+    SELECT pt.id, pt.session_id, pt.project_id, pt.task_key, pt.description, pt.status, pt.created_at, pt.updated_at
     FROM pending_tasks pt
-    WHERE pt.status = 'pending'
-    ORDER BY pt.created_at DESC
-    LIMIT 20
+    WHERE pt.status IN (${placeholders})
+      ${scopeClause}
+    ORDER BY COALESCE(pt.updated_at, pt.created_at) DESC, pt.created_at DESC
+    LIMIT ?
   `);
 
-  return stmt.all();
+  return stmt.all(...normalizedStatuses, ...params, limit);
+}
+
+function countPendingTasks(db, { projectId, statuses = ACTIVE_TASK_STATUSES } = {}) {
+  const normalizedStatuses = statuses.map((status) => normalizeTaskStatus(status));
+  const placeholders = normalizedStatuses.map(() => '?').join(', ');
+  const params = [];
+  let scopeClause = '';
+
+  if (projectId) {
+    scopeClause = `AND (
+      pt.project_id = ?
+      OR (
+        pt.project_id IS NULL
+        AND EXISTS (
+          SELECT 1
+          FROM sessions s
+          WHERE s.id = pt.session_id
+            AND s.project_id = ?
+        )
+      )
+    )`;
+    params.push(projectId, projectId);
+  }
+
+  const row = db.prepare(`
+    SELECT COUNT(*) AS count
+    FROM pending_tasks pt
+    WHERE pt.status IN (${placeholders})
+      ${scopeClause}
+  `).get(...normalizedStatuses, ...params);
+
+  return Number(row && row.count ? row.count : 0);
+}
+
+function getSessionPendingTasks(db, { sessionId, limit = 200, statuses = ACTIVE_TASK_STATUSES } = {}) {
+  if (!sessionId) {
+    return [];
+  }
+
+  const normalizedStatuses = statuses.map((status) => normalizeTaskStatus(status));
+  const placeholders = normalizedStatuses.map(() => '?').join(', ');
+
+  const stmt = db.prepare(`
+    SELECT pt.id, pt.session_id, pt.project_id, pt.task_key, pt.description, pt.status, pt.created_at, pt.updated_at
+    FROM pending_tasks pt
+    WHERE pt.session_id = ?
+      AND pt.status IN (${placeholders})
+    ORDER BY COALESCE(pt.updated_at, pt.created_at) DESC, pt.created_at DESC
+    LIMIT ?
+  `);
+
+  return stmt.all(sessionId, ...normalizedStatuses, limit);
+}
+
+function countSessionPendingTasks(db, { sessionId, statuses = ACTIVE_TASK_STATUSES } = {}) {
+  if (!sessionId) {
+    return 0;
+  }
+
+  const normalizedStatuses = statuses.map((status) => normalizeTaskStatus(status));
+  const placeholders = normalizedStatuses.map(() => '?').join(', ');
+  const row = db.prepare(`
+    SELECT COUNT(*) AS count
+    FROM pending_tasks
+    WHERE session_id = ?
+      AND status IN (${placeholders})
+  `).get(sessionId, ...normalizedStatuses);
+
+  return Number(row && row.count ? row.count : 0);
+}
+
+function sessionUsedTodoTool(db, sessionId) {
+  if (!sessionId) {
+    return false;
+  }
+
+  const placeholders = TODO_TOOL_NAMES.map(() => '?').join(', ');
+  const row = db.prepare(`
+    SELECT COUNT(*) AS count
+    FROM observations
+    WHERE session_id = ?
+      AND LOWER(tool_name) IN (${placeholders})
+      AND event_type = ?
+  `).get(sessionId, ...TODO_TOOL_NAMES, 'tool_complete');
+
+  return Number(row && row.count ? row.count : 0) > 0;
+}
+
+function getVerificationCompletionState(db, { sessionId } = {}) {
+  const todoToolUsed = sessionUsedTodoTool(db, sessionId);
+  if (!todoToolUsed) {
+    return {
+      status: 'neutral',
+      todoToolUsed: false,
+      incompleteCount: 0,
+      incompleteTasks: [],
+      blockReason: null,
+    };
+  }
+
+  const incompleteTasks = getSessionPendingTasks(db, { sessionId });
+  const incompleteCount = countSessionPendingTasks(db, { sessionId });
+  if (incompleteCount > 0) {
+    return {
+      status: 'blocked',
+      todoToolUsed: true,
+      incompleteCount,
+      incompleteTasks,
+      blockReason: 'incomplete_tasks',
+    };
+  }
+
+  return {
+    status: 'pass',
+    todoToolUsed: true,
+    incompleteCount: 0,
+    incompleteTasks: [],
+    blockReason: null,
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -361,15 +717,17 @@ function isVecAvailable() {
  * Insert a knowledge entry with its embedding vector.
  * Returns the inserted row id.
  */
-function insertKnowledge(db, { source, kind, content, createdAt, sessionId, embedding, projectId, confidence }) {
+function insertKnowledge(db, { source, kind, content, createdAt, sessionId, embedding, projectId, label, importance, confidence }) {
+  const normalizedImportance = VALID_IMPORTANCE.has(importance) ? importance : 'medium';
   const stmt = db.prepare(`
-    INSERT INTO knowledge (source, kind, content, created_at, session_id, project_id, confidence)
-    VALUES (?, ?, ?, ?, ?, ?, ?)
+    INSERT INTO knowledge (source, kind, content, created_at, session_id, project_id, label, importance, confidence)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
   `);
 
   const result = stmt.run(
     source, kind || 'pattern', content, createdAt, sessionId || null,
-    projectId || null, typeof confidence === 'number' ? confidence : 0.5
+    projectId || null, label || null, normalizedImportance,
+    typeof confidence === 'number' ? confidence : 0.5
   );
   const rowId = result.lastInsertRowid;
 
@@ -377,9 +735,12 @@ function insertKnowledge(db, { source, kind, content, createdAt, sessionId, embe
   if (embedding) {
     try {
       const vecStmt = db.prepare(
-        'INSERT INTO knowledge_vec (rowid, embedding) VALUES (?, ?)'
+        'INSERT INTO knowledge_vec (embedding) VALUES (?)'
       );
-      vecStmt.run(rowId, vecToBlob(embedding));
+      const vecResult = vecStmt.run(vecToBlob(embedding));
+      db.prepare(
+        'INSERT OR REPLACE INTO knowledge_vec_map (knowledge_id, vec_rowid) VALUES (?, ?)'
+      ).run(Number(rowId), Number(vecResult.lastInsertRowid));
     } catch {
       // sqlite-vec not loaded or knowledge_vec table missing — skip vector storage
     }
@@ -392,18 +753,21 @@ function insertKnowledge(db, { source, kind, content, createdAt, sessionId, embe
  * Search knowledge by vector similarity.
  * Returns [{id, source, kind, content, created_at, distance}] ordered by nearest first.
  */
-function searchKnowledge(db, embedding, limit = 5) {
+function searchKnowledge(db, embedding, limit = 5, { projectId } = {}) {
   try {
+    const scope = buildScopedKnowledgeFilter('kn', projectId);
     const stmt = db.prepare(`
       SELECT kn.id, kn.source, kn.kind, kn.content, kn.created_at, v.distance
       FROM knowledge_vec v
-      INNER JOIN knowledge kn ON kn.id = v.rowid
+      INNER JOIN knowledge_vec_map m ON m.vec_rowid = v.rowid
+      INNER JOIN knowledge kn ON kn.id = m.knowledge_id
       WHERE v.embedding MATCH ?
         AND k = ?
+        AND ${scope.clause}
       ORDER BY v.distance
     `);
 
-    return stmt.all(vecToBlob(embedding), limit);
+    return stmt.all(vecToBlob(embedding), limit, ...scope.params);
   } catch {
     // sqlite-vec not loaded or knowledge_vec table missing
     return [];
@@ -413,16 +777,18 @@ function searchKnowledge(db, embedding, limit = 5) {
 /**
  * Search knowledge by keyword (fallback when no embedding available).
  */
-function searchKnowledgeByKeyword(db, keyword, limit = 10) {
+function searchKnowledgeByKeyword(db, keyword, limit = 10, { projectId } = {}) {
+  const scope = buildScopedKnowledgeFilter('knowledge', projectId);
   const stmt = db.prepare(`
-    SELECT id, source, kind, content, created_at
+    SELECT id, source, kind, content, created_at, session_id, project_id, label, importance, confidence
     FROM knowledge
     WHERE content LIKE ?
+      AND ${scope.clause}
     ORDER BY created_at DESC
     LIMIT ?
   `);
 
-  return stmt.all(`%${keyword}%`, limit);
+  return stmt.all(`%${keyword}%`, ...scope.params, limit);
 }
 
 /**
@@ -430,7 +796,7 @@ function searchKnowledgeByKeyword(db, keyword, limit = 10) {
  */
 function getAllKnowledge(db, limit = 100) {
   const stmt = db.prepare(`
-    SELECT id, source, kind, content, created_at, session_id, project_id, confidence
+    SELECT id, source, kind, content, created_at, session_id, project_id, label, importance, confidence
     FROM knowledge
     ORDER BY created_at DESC
     LIMIT ?
@@ -444,25 +810,52 @@ function getAllKnowledge(db, limit = 100) {
  * Falls back to cross-project results when project-specific results are sparse.
  */
 function getProjectKnowledge(db, { projectId, minConfidence = 0.4, limit = 10 } = {}) {
-  if (projectId && projectId !== 'local') {
+  if (projectId) {
+    const scope = buildProjectScopedKnowledgeClause(projectId);
     const stmt = db.prepare(`
-      SELECT id, source, kind, content, created_at, session_id, project_id, confidence
+      SELECT id, source, kind, content, created_at, session_id, project_id, label, importance, confidence
       FROM knowledge
-      WHERE project_id = ? AND confidence >= ?
+      WHERE ${scope.clause}
       ORDER BY confidence DESC, created_at DESC
       LIMIT ?
     `);
-    const rows = stmt.all(projectId, minConfidence, limit);
+    const rows = stmt.all(...scope.params, minConfidence, limit);
     if (rows.length >= 3) {
       return rows;
     }
+
+    const seenIds = new Set(rows.map((row) => row.id));
+
+    const fallback = db.prepare(`
+      SELECT id, source, kind, content, created_at, session_id, project_id, label, importance, confidence
+      FROM knowledge
+      WHERE confidence >= ?
+        AND NOT (kind = 'unresolved_issue' AND COALESCE(label, '') = 'err')
+      ORDER BY confidence DESC, created_at DESC
+      LIMIT ?
+    `).all(minConfidence, limit);
+
+    const mergedRows = [...rows];
+    for (const entry of fallback) {
+      if (mergedRows.length >= limit) {
+        break;
+      }
+
+      if (!seenIds.has(entry.id)) {
+        mergedRows.push(entry);
+        seenIds.add(entry.id);
+      }
+    }
+
+    return mergedRows;
   }
 
   // Fallback: cross-project, confidence-filtered
   const fallback = db.prepare(`
-    SELECT id, source, kind, content, created_at, session_id, project_id, confidence
+    SELECT id, source, kind, content, created_at, session_id, project_id, label, importance, confidence
     FROM knowledge
     WHERE confidence >= ?
+      AND NOT (kind = 'unresolved_issue' AND COALESCE(label, '') = 'err')
     ORDER BY confidence DESC, created_at DESC
     LIMIT ?
   `);
@@ -480,12 +873,19 @@ function searchKnowledgeByKeywords(db, keywords, { projectId, limit = 10 } = {})
 
   // Build WHERE clause: (content LIKE ? OR content LIKE ? ...)
   const likeClauses = keywords.map(() => 'content LIKE ?');
-  const projectFilter = (projectId && projectId !== 'local')
-    ? 'AND (project_id = ? OR project_id IS NULL)'
+  const projectFilter = projectId
+    ? `AND (
+        project_id = ?
+        OR (
+          project_id IS NULL
+          AND kind != 'unresolved_issue'
+          AND COALESCE(label, '') != 'err'
+        )
+      )`
     : '';
 
   const sql = `
-    SELECT DISTINCT id, source, kind, content, created_at, session_id, project_id, confidence
+    SELECT DISTINCT id, source, kind, content, created_at, session_id, project_id, label, importance, confidence
     FROM knowledge
     WHERE (${likeClauses.join(' OR ')}) ${projectFilter}
     ORDER BY confidence DESC, created_at DESC
@@ -493,7 +893,7 @@ function searchKnowledgeByKeywords(db, keywords, { projectId, limit = 10 } = {})
   `;
 
   const params = keywords.map((kw) => `%${kw}%`);
-  if (projectId && projectId !== 'local') {
+  if (projectId) {
     params.push(projectId);
   }
   params.push(limit);
@@ -505,7 +905,7 @@ function searchKnowledgeByKeywords(db, keywords, { projectId, limit = 10 } = {})
  * Get recent sessions filtered by project.
  */
 function getRecentProjectSessions(db, { projectId, limit = 3 } = {}) {
-  if (projectId && projectId !== 'local') {
+  if (projectId) {
     const stmt = db.prepare(`
       SELECT id, started_at, ended_at, branch, summary, project_id
       FROM sessions
@@ -616,12 +1016,12 @@ function detectProjectId(cwd) {
         stdio: ['pipe', 'pipe', 'pipe'],
       }).trim();
     } catch {
-      return 'local';
+      hashSource = path.resolve(cwd || process.cwd());
     }
   }
 
   if (!hashSource) {
-    return 'local';
+    hashSource = path.resolve(cwd || process.cwd());
   }
 
   return crypto.createHash('sha256').update(hashSource).digest('hex').slice(0, 12);
@@ -663,23 +1063,29 @@ module.exports = {
   countSessionObservations,
   detectProjectId,
   ensureDependencies,
+  countPendingTasks,
+  countSessionPendingTasks,
   getAllKnowledge,
   getProjectKnowledge,
   getRecentProjectSessions,
   getRecentSessions,
   getPendingTasks,
+  getSessionPendingTasks,
   getSessionObservations,
+  getVerificationCompletionState,
   insertKnowledge,
   insertObservation,
   insertPendingTask,
   insertSessionFiles,
   isAvailable,
   isVecAvailable,
+  normalizeTaskStatus,
   open,
   pruneOldObservations,
   searchKnowledge,
   searchKnowledgeByKeyword,
   searchKnowledgeByKeywords,
+  upsertPendingTask,
   upsertSession,
   vecToBlob,
   DB_PATH,

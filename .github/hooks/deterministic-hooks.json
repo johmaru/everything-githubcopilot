@@ -58,7 +58,7 @@
         ]
       },
       {
-        "matcher": "Edit",
+        "matcher": "Edit|Write|MultiEdit",
         "description": "Auto-format JS and TS files after edits.",
         "hooks": [
           {
@@ -68,7 +68,7 @@
         ]
       },
       {
-        "matcher": "Edit",
+        "matcher": "Edit|Write|MultiEdit",
         "description": "Run a targeted TypeScript check after editing TS files.",
         "hooks": [
           {
@@ -78,7 +78,7 @@
         ]
       },
       {
-        "matcher": "Edit",
+        "matcher": "Edit|Write|MultiEdit",
         "description": "Warn when edited JS or TS files still contain console.log statements.",
         "hooks": [
           {
@@ -96,6 +96,20 @@
             "command": "node -e \"var s='./scripts/hooks/observe-tool.js';require('fs').existsSync(s)&&require(s)\"",
             "async": true,
             "timeout": 5
+          }
+        ]
+      }
+    ],
+    "PostToolUseFailure": [
+      {
+        "matcher": "*",
+        "description": "Classify failed tool calls and record dry-run correction suggestions.",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node ./scripts/hooks/tool-call-correction.js",
+            "async": true,
+            "timeout": 10
           }
         ]
       }
@@ -119,6 +133,16 @@
           {
             "type": "command",
             "command": "node -e \"var s='./scripts/hooks/session-stop.js';require('fs').existsSync(s)&&require(s)\"",
+            "timeout": 10
+          }
+        ]
+      },
+      {
+        "description": "Delete temporary safety backups for the current session.",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node ./scripts/hooks/safety-backup.js cleanup",
             "timeout": 10
           }
         ]

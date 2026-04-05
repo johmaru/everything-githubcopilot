@@ -1,16 +1,21 @@
 #!/usr/bin/env node
 'use strict';
 
-const { emit, getContext, getFilePath, runLocalBin } = require('./_shared');
+const { emit, getContext, getFilePaths, runLocalBin } = require('./_shared');
 
 const context = getContext();
-const filePath = getFilePath(context);
+const filePaths = getFilePaths(context);
 
-if (!filePath || !/\.(ts|tsx)$/i.test(filePath)) {
+if (!filePaths.some((filePath) => /\.(ts|tsx)$/i.test(filePath))) {
   process.exit(0);
 }
 
 const result = runLocalBin('tsc', ['--noEmit', '--pretty', 'false']);
+if (!result) {
+  emit('Hook warning: local tsc not found; skipping targeted TypeScript check');
+  process.exit(0);
+}
+
 if (result && result.status !== 0) {
   const output = (result.stdout || result.stderr || '').trim();
   if (output) {

@@ -13,4 +13,4 @@ Use [the repository-wide instructions](../copilot-instructions.md) and any relev
 4. Produce phased implementation steps, risks, and validation commands.
 5. Stop after presenting the plan and wait for user confirmation before editing files.
 
-> **Tip**: If you want the plan to incorporate researched best practices with source attribution, use `#research-plan` instead.
+> **Tip**: If you want the plan to incorporate researched best practices with source attribution, use `/research-plan` instead.

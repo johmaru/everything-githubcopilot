@@ -51,6 +51,7 @@ try {
 
 // Capture recently modified tracked files (last 10)
 const modifiedFiles = [];
+let totalModifiedFileCount = 0;
 try {
   const diff = spawnSync('git', ['diff', '--name-only', 'HEAD'], {
     cwd: process.cwd(),
@@ -58,7 +59,12 @@ try {
     timeout: 5000,
   });
   if (diff.status === 0 && diff.stdout.trim()) {
-    modifiedFiles.push(...diff.stdout.trim().split('\n').slice(0, 10));
+    const allModifiedFiles = diff.stdout.trim().split('\n');
+    totalModifiedFileCount = allModifiedFiles.length;
+    modifiedFiles.push(...allModifiedFiles.slice(0, 10));
+    lines.push(`- **Modified File Count**: ${totalModifiedFileCount}`);
+    lines.push(`- **Displayed File Count**: ${modifiedFiles.length}`);
+    lines.push(`- **Modified Files Truncated**: ${totalModifiedFileCount > modifiedFiles.length ? 'yes' : 'no'}`);
     lines.push('', '## Modified Files', '');
     for (const f of modifiedFiles) {
       lines.push(`- ${f}`);
@@ -70,8 +76,9 @@ try {
 
 // Persist to SQLite
 const handle = db.open();
+const shouldPersistSession = handle && sessionId !== 'unknown';
 
-if (handle) {
+if (shouldPersistSession) {
   try {
     db.upsertSession(handle, {
       id: sessionId,
@@ -90,6 +97,8 @@ if (handle) {
   } finally {
     db.close();
   }
+} else if (handle) {
+  db.close();
 }
 
 // Always write markdown snapshot as well

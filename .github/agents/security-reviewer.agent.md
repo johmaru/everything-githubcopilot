@@ -2,6 +2,7 @@
 name: "security-reviewer"
 description: "Use when reviewing instructions, hooks, scripts, or repository changes for secrets, unsafe commands, injection risks, and other security issues."
 argument-hint: "Describe the area that needs a security review"
+user-invocable: false
 ---
 
 # Security Reviewer Agent

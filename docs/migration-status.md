@@ -8,7 +8,7 @@ This document tracks the current state of the repository after migration from th
 
 Legacy ECC directories and files have been removed:
 
-- Deleted root directories: `.claude`, `.cursor`, `.kiro`, `.agents`, `.claude-plugin`, `agents`, `commands`, `rules`, `skills`, `hooks`, `contexts`, `ecc2`, `manifests`, `schemas`, `plugins`, `mcp-configs`, `examples`
+- Deleted root directories: `.claude`, `.cursor`, `.kiro`, `.agents`, `.claude-plugin`, `agents`, `commands`, `rules`, `skills`, `hooks`, `contexts`, `ecc2`, `manifests`, `plugins`, `mcp-configs`, `examples`
 - Deleted root files: `CLAUDE.md`, `install.ps1`, `install.sh`, `VERSION`, `.env.example`, `SPONSORING.md`, `SPONSORS.md`
 - Deleted legacy CI validators and scripts (21 JS files, 5 directories)
 - Deleted legacy test directories and files
@@ -16,19 +16,23 @@ Legacy ECC directories and files have been removed:
 ### Active Copilot structure
 
 - `.github/copilot-instructions.md` — repository-wide instructions
-- `.github/instructions/` — 69 path-specific instruction files
-- `.github/prompts/` — 12 reusable slash workflows
-- `.github/agents/` — 13 custom agents
+- `.github/instructions/` — 71 path-specific instruction files
+- `.github/prompts/` — 20 reusable slash workflows
+- `.github/agents/` — 21 custom agents (4 user-visible: planner, coder, researcher, supporter; 17 internal specialists)
 - `.github/hooks/deterministic-hooks.json` — deterministic edit/validation hooks
-- `.github/skills/` — 117 skill definitions (converted from legacy)
+- `.github/skills/` — 120+ skill definitions (converted from legacy)
 
 ### Prompts
 
-plan, architect, tdd, code-review, build-fix, docs, e2e, typescript-review, python-review, go-review, refactor-clean, research-plan
+plan, plan-and-implement, architect, tdd, code-review, review, build-fix, fix-test, docs, e2e, typescript-review, python-review, go-review, refactor-clean, research-plan, checkpoint, evolve, learn, verify, knowledge-audit
 
-### Custom agents
+### User-visible core agents (directly invocable)
 
-planner, architect, tdd-guide, code-reviewer, security-reviewer, build-error-resolver, docs-lookup, e2e-runner, typescript-reviewer, python-reviewer, go-reviewer, refactor-cleaner, best-practice-researcher
+planner, coder, researcher, supporter
+
+### Internal specialist agents (explicitly invoked)
+
+17 internal specialists: architect, tdd-guide, code-reviewer, security-reviewer, build-error-resolver, docs-lookup, e2e-runner, typescript-reviewer, python-reviewer, go-reviewer, refactor-cleaner, best-practice-researcher, agent-auditor, code-structure-auditor, design-coherence-auditor, knowledge-curator, safety-checker — called by core agents (planner/coder/researcher/supporter) or from prompt files
 
 ### Validation and CI
 
@@ -37,11 +41,28 @@ planner, architect, tdd-guide, code-reviewer, security-reviewer, build-error-res
 - `scripts/ci/validate-no-personal-paths.js` checks for hardcoded personal paths
 - `npm test` runs all three validators
 - `npm run lint` runs ESLint + markdownlint
+- Benchmark/eval scripts are shipped for the active Copilot path: `entry-points:eval`, `skill-router:eval`, `correction:eval`, `verification:eval`, `phase6:benchmark`
+
+### User-level installer
+
+- `scripts/installer/cli.js` provides `install`, `uninstall`, and `reinstall` commands for `~/.copilot/`
+- `scripts/setup-system.ps1` and `scripts/setup-system.sh` wrap the shared installer for user-level setup
+- `scripts/cleanup-system.ps1` and `scripts/cleanup-system.sh` wrap the shared uninstall flow
+- Installer state tracks the previous VS Code user settings content so uninstall can restore it exactly
+- Install refuses to overwrite a pre-existing unmanaged `~/.copilot/` directory without installer state
+- User-level setup now syncs the repo baseline for instructions, agents, skills, prompts, hooks, `AGENTS.md`, and legacy `.claude` discovery toggles
+
+### Project-level installer
+
+- `scripts/installer/project-setup.js` is the shared implementation behind `scripts/setup-project.ps1` and `scripts/setup-project.sh`
+- Project setup copies `.github/`, `.github/workflows/`, `AGENTS.md`, `schemas/`, `scripts/ci/`, `scripts/hooks/`, `tests/fixtures/`, and `rust/semantic-indexer/`
+- Existing `.vscode/settings.json` files are preserved with a warning; missing ones are seeded from the shipped workspace baseline
+- Dependency bootstrap follows the target project's package manager when it can detect one, and falls back to `npm` otherwise
 
 ### Package identity
 
 - `package.json`: name=`everything-githubcopilot`, version=`2.0.0`
-- Only runtime dependency: `ajv`
+- Runtime dependencies: `@huggingface/transformers`, `ajv`, `better-sqlite3`, `sqlite-vec`
 
 ### Documentation
 
@@ -51,6 +72,8 @@ planner, architect, tdd-guide, code-reviewer, security-reviewer, build-error-res
 - Legacy ECC docs in `docs/` replaced with redirect notices
 
 ## Remaining work
+
+This section is a migration-era note, not the active execution backlog. Current backlog ownership lives in local planning docs when present, for example PRODUCT.md.
 
 ### Content review needed
 
@@ -64,5 +87,6 @@ planner, architect, tdd-guide, code-reviewer, security-reviewer, build-error-res
 - Additional prompts for workflows currently not covered
 - Broader instruction coverage for languages and frameworks
 - Expand deterministic hooks under `.github/hooks/`
-3. Narrow compatibility validators and packaging debt incrementally instead of treating them as blockers for the active Copilot-first path.
-4. Leave P3 work, especially non-active translation cleanup and broad archival, until the active Copilot path is stable.
+
+- Migration note: Narrow compatibility validators and packaging debt incrementally instead of treating them as blockers for the active Copilot-first path.
+- Migration note: Leave P3 work, especially non-active translation cleanup and broad archival, until the active Copilot path is stable.
