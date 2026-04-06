@@ -171,6 +171,162 @@ results.push(
 );
 
 results.push(
+  test('rankEntryPointsByKeyword prefers focused symbols over broad module matches', () => {
+    const entries = [
+      {
+        stable_symbol_id: 'rust:src/indexer.rs:module:src/indexer.rs:0',
+        file_path: 'src/indexer.rs',
+        name: 'src/indexer.rs',
+        kind: 'module',
+        source_text: 'use crate::model::{Language, SymbolRecord}; pub fn extract_symbols_from_source(source: &str, file_path: &str) -> Result<Vec<SymbolRecord>> { extract_symbols_from_source_with_language(source, file_path, Language::Typescript) } pub fn extract_symbols_from_source_with_language(source: &str, file_path: &str, language: Language) -> Result<Vec<SymbolRecord>> { let mut parsers = ParserSet::default(); extract_symbols_with_parsers(source, file_path, language, &mut parsers) }',
+      },
+      {
+        stable_symbol_id: 'rust:src/indexer.rs:function:extract_symbols_from_source_with_language:0',
+        file_path: 'src/indexer.rs',
+        name: 'extract_symbols_from_source_with_language',
+        kind: 'function',
+        signature: 'pub fn extract_symbols_from_source_with_language(',
+        source_text: 'pub fn extract_symbols_from_source_with_language(source: &str, file_path: &str, language: Language) -> Result<Vec<SymbolRecord>> { let mut parsers = ParserSet::default(); extract_symbols_with_parsers(source, file_path, language, &mut parsers) }',
+      },
+    ];
+
+    const ranked = entryPoints.rankEntryPointsByKeyword(
+      'extract symbols from source with language tree sitter typescript python rust',
+      entries,
+      1
+    );
+
+    assert.strictEqual(ranked.length, 1);
+    assert.strictEqual(
+      ranked[0].stable_symbol_id,
+      'rust:src/indexer.rs:function:extract_symbols_from_source_with_language:0'
+    );
+  })
+);
+
+results.push(
+  test('rankEntryPointsByKeyword still uses metadata tokens from entry text', () => {
+    const entries = [
+      {
+        stable_symbol_id: 'python:skills/parser.py:class:Detector:0',
+        file_path: 'skills/parser.py',
+        name: 'Detector',
+        kind: 'class',
+        text: 'language=python file=skills/parser.py kind=class name=Detector doc_comment=Represents a detector',
+      },
+      {
+        stable_symbol_id: 'typescript:skills/parser.ts:function:detect:0',
+        file_path: 'skills/parser.ts',
+        name: 'detect',
+        kind: 'function',
+        text: 'language=typescript file=skills/parser.ts kind=function name=detect',
+      },
+    ];
+
+    const ranked = entryPoints.rankEntryPointsByKeyword('python class detector', entries, 1);
+
+    assert.strictEqual(ranked.length, 1);
+    assert.strictEqual(ranked[0].stable_symbol_id, 'python:skills/parser.py:class:Detector:0');
+  })
+);
+
+results.push(
+  test('rankEntryPointsByKeyword prefers implementation over thin re-exports', () => {
+    const entries = [
+      {
+        stable_symbol_id: 'typescript:.opencode/index.ts:export:ECCHooksPlugin:0',
+        file_path: '.opencode/index.ts',
+        name: 'ECCHooksPlugin',
+        kind: 'export',
+        signature: 'ECCHooksPlugin',
+        source_text: 'ECCHooksPlugin',
+        text: 'language=typescript file=.opencode/index.ts kind=export name=ECCHooksPlugin',
+      },
+      {
+        stable_symbol_id: 'typescript:.opencode/plugins/index.ts:export:ECCHooksPlugin:0',
+        file_path: '.opencode/plugins/index.ts',
+        name: 'ECCHooksPlugin',
+        kind: 'export',
+        signature: 'ECCHooksPlugin',
+        source_text: 'ECCHooksPlugin',
+        text: 'language=typescript file=.opencode/plugins/index.ts kind=export name=ECCHooksPlugin',
+      },
+      {
+        stable_symbol_id: 'typescript:.opencode/plugins/ecc-hooks.ts:function:ECCHooksPlugin:0',
+        file_path: '.opencode/plugins/ecc-hooks.ts',
+        name: 'ECCHooksPlugin',
+        kind: 'function',
+        signature: 'ECCHooksPlugin = async ({',
+        source_text: 'ECCHooksPlugin = async ({ client, $, directory, worktree }: PluginInput) => { return { "file.edited": async () => {}, "tool.execute.before": async () => {}, "session.idle": async () => {} } }',
+        text: 'language=typescript file=.opencode/plugins/ecc-hooks.ts kind=function name=ECCHooksPlugin tool execute before session idle file edited hook plugin',
+      },
+    ];
+
+    const ranked = entryPoints.rankEntryPointsByKeyword(
+      'opencode hook plugin tool execute before session idle file edited',
+      entries,
+      1
+    );
+
+    assert.strictEqual(ranked.length, 1);
+    assert.strictEqual(
+      ranked[0].stable_symbol_id,
+      'typescript:.opencode/plugins/ecc-hooks.ts:function:ECCHooksPlugin:0'
+    );
+  })
+);
+
+results.push(
+  test('rankEntryPointsByKeyword does not over-penalize long implementations', () => {
+    const entries = [
+      {
+        stable_symbol_id: 'rust:src/indexer.rs:module:src/indexer.rs:0',
+        file_path: 'src/indexer.rs',
+        name: 'src/indexer.rs',
+        kind: 'module',
+        source_text: 'use std::path::Path; use crate::extract::collect_symbols; use crate::parser::ParserSet; pub fn extract_symbols_from_source(source: &str, file_path: &str) -> Result<Vec<SymbolRecord>> { extract_symbols_from_source_with_language(source, file_path, Language::Typescript) } pub fn extract_symbols_from_source_with_language(source: &str, file_path: &str, language: Language) -> Result<Vec<SymbolRecord>> { let mut parsers = ParserSet::default(); extract_symbols_with_parsers(source, file_path, language, &mut parsers) } #[test] fn extracts_module_class_and_function_symbols_from_inline_python() { } #[test] fn extracts_module_struct_and_function_symbols_from_inline_rust() { }',
+      },
+      {
+        stable_symbol_id: 'rust:src/indexer.rs:function:extract_symbols_from_source_with_language:0',
+        file_path: 'src/indexer.rs',
+        name: 'extract_symbols_from_source_with_language',
+        kind: 'function',
+        signature: 'pub fn extract_symbols_from_source_with_language(',
+        source_text: 'pub fn extract_symbols_from_source_with_language(source: &str, file_path: &str, language: Language) -> Result<Vec<SymbolRecord>> { let mut parsers = ParserSet::default(); extract_symbols_with_parsers(source, file_path, language, &mut parsers); let alpha = 1; let beta = 2; let gamma = 3; let delta = 4; let epsilon = 5; let zeta = 6; let eta = 7; let theta = 8; let iota = 9; let kappa = 10; }',
+      },
+    ];
+
+    const ranked = entryPoints.rankEntryPointsByKeyword(
+      'extract symbols from source with language tree sitter typescript python rust',
+      entries,
+      1
+    );
+
+    assert.strictEqual(ranked.length, 1);
+    assert.strictEqual(
+      ranked[0].stable_symbol_id,
+      'rust:src/indexer.rs:function:extract_symbols_from_source_with_language:0'
+    );
+  })
+);
+
+results.push(
+  test('createJsonLineCollector parses chunked JSONL streams', () => {
+    const collector = entryPoints.createJsonLineCollector();
+
+    collector.push('{"file_path":"src/a.rs"}\n{"file_path":"src/');
+    collector.push('b.rs"}\n\n{"file_path":"src/c.rs"}');
+
+    const records = collector.finish();
+
+    assert.deepStrictEqual(
+      records.map((record) => record.file_path),
+      ['src/a.rs', 'src/b.rs', 'src/c.rs']
+    );
+  })
+);
+
+results.push(
   test('evaluateQueries counts hits when expected symbols appear within topK', () => {
     const entries = [
       {
@@ -233,7 +389,7 @@ results.push(
             text: 'parse yaml compliance spec threshold promote to hook',
           },
           {
-            file_path: 'rust/semantic-indexer/src/lib.rs',
+            file_path: 'rust/semantic-indexer/src/indexer.rs',
             name: 'extract_symbols_from_source_with_language',
             text: 'extract symbols from source with language tree sitter typescript python rust',
           },
@@ -265,6 +421,47 @@ results.push(
       assert.strictEqual(report.hits, 4);
       assert.strictEqual(report.missCount, 0);
       assert.strictEqual(report.hitRate, 1);
+    } finally {
+      cleanupTestDir(testDir);
+    }
+  })
+);
+
+results.push(
+  test('index command writes streamed semantic indexer results to the index file', () => {
+    const testDir = createWorkspaceTestDir();
+    const repoRoot = path.join(__dirname, '..', '..');
+    const indexFile = path.join(testDir, 'entry-points-index.json');
+
+    try {
+      const output = execFileSync(
+        'node',
+        [
+          path.join(repoRoot, 'scripts', 'hooks', 'codebase-entry-points.js'),
+          'index',
+          '--root',
+          repoRoot,
+          '--index-file',
+          indexFile,
+          '--file',
+          'rust/semantic-indexer/src/indexer.rs',
+        ],
+        {
+          cwd: repoRoot,
+          encoding: 'utf8',
+          stdio: ['pipe', 'pipe', 'pipe'],
+          timeout: 120000,
+        }
+      );
+
+      const summary = JSON.parse(output);
+      const persistedIndex = JSON.parse(fs.readFileSync(indexFile, 'utf8'));
+
+      assert.deepStrictEqual(summary.indexedFiles, ['rust/semantic-indexer/src/indexer.rs']);
+      assert.ok(summary.entryCount > 0);
+      assert.ok(
+        persistedIndex.entries.some((entry) => entry.file_path === 'rust/semantic-indexer/src/indexer.rs')
+      );
     } finally {
       cleanupTestDir(testDir);
     }

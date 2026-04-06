@@ -1,3 +1,4 @@
+use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
@@ -24,7 +25,7 @@ fn fixture_paths() -> [PathBuf; 4] {
         root.join("rust")
             .join("semantic-indexer")
             .join("src")
-            .join("lib.rs"),
+            .join("model.rs"),
     ]
 }
 
@@ -67,7 +68,7 @@ fn cli_outputs_json_for_repo_self_fixtures() {
             && record["kind"] == "class"
     }));
     assert!(array.iter().any(|record| {
-        record["file_path"] == "rust/semantic-indexer/src/lib.rs"
+        record["file_path"] == "rust/semantic-indexer/src/model.rs"
             && record["language"] == "rust"
             && record["kind"] == "struct"
     }));
@@ -141,7 +142,7 @@ fn cli_outputs_jsonl_for_repo_self_fixtures() {
         .any(|record| record["file_path"] == ".github/skills/skill-comply/scripts/parser.py"));
     assert!(records
         .iter()
-        .any(|record| record["file_path"] == "rust/semantic-indexer/src/lib.rs"));
+        .any(|record| record["file_path"] == "rust/semantic-indexer/src/model.rs"));
     assert!(records.iter().all(|record| record["text"].is_string()));
     assert!(records.iter().all(|record| record["language"].is_string()));
     assert!(records
@@ -218,4 +219,53 @@ fn cli_rejects_source_files_outside_selected_root() {
     );
     let stderr = String::from_utf8(output.stderr).unwrap();
     assert!(stderr.contains("outside the selected root"));
+}
+
+#[test]
+fn cli_emits_unique_stable_symbol_ids_for_duplicate_names_in_same_file() {
+    let root = repo_root();
+    let fixture = root
+        .join("rust")
+        .join("semantic-indexer")
+        .join("src")
+        .join("model.rs");
+
+    let output = Command::new(env!("CARGO_BIN_EXE_semantic-indexer"))
+        .arg("--root")
+        .arg(&root)
+        .arg("--format")
+        .arg("json")
+        .arg("--file")
+        .arg(&fixture)
+        .output()
+        .unwrap();
+
+    assert!(
+        output.status.success(),
+        "CLI should exit successfully: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let records: Value = serde_json::from_slice(&output.stdout).unwrap();
+    let array = records.as_array().unwrap();
+    let duplicate_name_records: Vec<&Value> = array
+        .iter()
+        .filter(|record| record["name"] == "as_str")
+        .collect();
+    let stable_ids: Vec<&str> = array
+        .iter()
+        .filter_map(|record| record["stable_symbol_id"].as_str())
+        .collect();
+    let unique_ids: HashSet<&str> = stable_ids.iter().copied().collect();
+
+    assert!(
+        duplicate_name_records.len() >= 2,
+        "fixture should contain at least two symbols with the same name"
+    );
+
+    assert_eq!(
+        stable_ids.len(),
+        unique_ids.len(),
+        "stable_symbol_id should be unique even when symbols share the same name"
+    );
 }

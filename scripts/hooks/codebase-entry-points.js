@@ -3,7 +3,7 @@
 
 const fs = require('fs');
 const path = require('path');
-const { execFileSync } = require('child_process');
+const { spawn } = require('child_process');
 
 const embedding = require('./embedding');
 
@@ -190,25 +190,109 @@ function rankEntryPoints(queryEmbedding, entries, topK = 5) {
 
 function tokenize(value) {
   return String(value || '')
+    .replace(/([a-z0-9])([A-Z])/g, '$1 $2')
     .toLowerCase()
-    .split(/[^a-z0-9_]+/)
+    .split(/[^a-z0-9]+/)
     .filter(Boolean);
+}
+
+function addWeightedTokens(tokenWeights, value, weight) {
+  if (!value || weight <= 0) {
+    return;
+  }
+
+  for (const token of new Set(tokenize(value))) {
+    tokenWeights.set(token, Math.max(tokenWeights.get(token) || 0, weight));
+  }
+}
+
+function countWeightedTokens(value, weight, limit = Number.POSITIVE_INFINITY) {
+  if (!value || weight <= 0) {
+    return 0;
+  }
+
+  return Math.min(new Set(tokenize(value)).size, limit) * weight;
+}
+
+function buildEntryKeywordProfile(entry) {
+  const tokenWeights = new Map();
+  let totalWeight = 0;
+
+  function addField(value, weight, limit = Number.POSITIVE_INFINITY) {
+    addWeightedTokens(tokenWeights, value, weight);
+    totalWeight += countWeightedTokens(value, weight, limit);
+  }
+
+  addField(entry.name, entry.kind === 'export' ? 3.5 : 5);
+  addField(entry.file_path, 3);
+  addField(entry.signature, 2.5);
+  addField(entry.doc_comment, 1.5, 24);
+  addField(entry.source_text, entry.kind === 'module' ? 0.25 : 1.25, entry.kind === 'module' ? 12 : 24);
+  addField(entry.text, entry.kind === 'module' ? 0.1 : 0.35, entry.kind === 'module' ? 16 : 24);
+
+  if (tokenWeights.size === 0 && entry.text) {
+    addField(entry.text, 1, 24);
+  }
+
+  return { tokenWeights, totalWeight };
+}
+
+function hasSubstantiveSourceText(entry) {
+  return tokenize(entry.source_text).length >= 8;
+}
+
+function buildFocusedTokenWeights(entry) {
+  const tokenWeights = new Map();
+  const allowExportFocus = entry.kind !== 'export' || hasSubstantiveSourceText(entry);
+
+  if (allowExportFocus) {
+    addWeightedTokens(tokenWeights, entry.name, 1);
+    addWeightedTokens(tokenWeights, entry.signature, 1);
+  }
+
+  return tokenWeights;
+}
+
+function sumMatchedTokenWeights(queryTokens, tokenWeights) {
+  let total = 0;
+  for (const token of queryTokens) {
+    total += tokenWeights.get(token) || 0;
+  }
+  return total;
 }
 
 function rankEntryPointsByKeyword(query, entries, topK = 5) {
   const queryTokens = new Set(tokenize(query));
-  const denominator = Math.max(queryTokens.size, 1);
+  const queryTokenCount = Math.max(queryTokens.size, 1);
 
   return (entries || [])
     .map((entry) => {
-      const entryTokens = new Set(tokenize(`${entry.name || ''} ${entry.file_path || ''} ${entry.text || ''}`));
-      let overlap = 0;
+      const { tokenWeights, totalWeight } = buildEntryKeywordProfile(entry);
+      const overlapWeight = sumMatchedTokenWeights(queryTokens, tokenWeights);
+
+      if (overlapWeight === 0) {
+        return sanitizeRankedEntry(entry, 0);
+      }
+
+      let matchedTokenCount = 0;
       for (const token of queryTokens) {
-        if (entryTokens.has(token)) {
-          overlap += 1;
+        if (tokenWeights.has(token)) {
+          matchedTokenCount += 1;
         }
       }
-      return sanitizeRankedEntry(entry, overlap / denominator);
+
+      const focusedTokenWeights = buildFocusedTokenWeights(entry);
+      const focusedOverlapWeight = sumMatchedTokenWeights(queryTokens, focusedTokenWeights);
+
+      const recall = matchedTokenCount / queryTokenCount;
+      const precision = overlapWeight / Math.max(totalWeight, 1);
+      const precisionWeightedFScore = (1.25 * precision * recall)
+        / ((0.25 * precision) + recall);
+      const focusedRecall = focusedOverlapWeight / queryTokenCount;
+      const score = Number.isFinite(precisionWeightedFScore)
+        ? precisionWeightedFScore + (focusedRecall * 0.35)
+        : 0;
+      return sanitizeRankedEntry(entry, score);
     })
     .sort((left, right) => right.score - left.score)
     .slice(0, topK);
@@ -284,12 +368,35 @@ function saveIndex(indexPath, payload) {
   fs.writeFileSync(indexPath, JSON.stringify(payload, null, 2));
 }
 
-function parseJsonLines(output) {
-  return output
-    .split(/\r?\n/)
-    .map((line) => line.trim())
-    .filter(Boolean)
-    .map((line) => JSON.parse(line));
+function createJsonLineCollector() {
+  const records = [];
+  let buffer = '';
+
+  return {
+    push(chunk) {
+      buffer += chunk;
+
+      while (true) {
+        const newlineIndex = buffer.indexOf('\n');
+        if (newlineIndex === -1) {
+          break;
+        }
+
+        const line = buffer.slice(0, newlineIndex).trim();
+        buffer = buffer.slice(newlineIndex + 1);
+        if (line) {
+          records.push(JSON.parse(line));
+        }
+      }
+    },
+    finish() {
+      const line = buffer.trim();
+      if (line) {
+        records.push(JSON.parse(line));
+      }
+      return records;
+    },
+  };
 }
 
 function runSemanticIndexer(rootDir, files) {
@@ -298,14 +405,64 @@ function runSemanticIndexer(rootDir, files) {
     args.push('--file', file);
   }
 
-  const output = execFileSync('cargo', args, {
-    cwd: rootDir,
-    encoding: 'utf8',
-    maxBuffer: 20 * 1024 * 1024,
-    stdio: ['ignore', 'pipe', 'pipe'],
-  });
+  return new Promise((resolve, reject) => {
+    const collector = createJsonLineCollector();
+    const child = spawn('cargo', args, {
+      cwd: rootDir,
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
+    let settled = false;
+    let stderr = '';
 
-  return parseJsonLines(output);
+    function rejectOnce(error) {
+      if (settled) {
+        return;
+      }
+      settled = true;
+      reject(error);
+    }
+
+    function resolveOnce(value) {
+      if (settled) {
+        return;
+      }
+      settled = true;
+      resolve(value);
+    }
+
+    child.stdout.setEncoding('utf8');
+    child.stderr.setEncoding('utf8');
+
+    child.stdout.on('data', (chunk) => {
+      try {
+        collector.push(chunk);
+      } catch (error) {
+        rejectOnce(error);
+        child.kill();
+      }
+    });
+    child.stderr.on('data', (chunk) => {
+      stderr += chunk;
+    });
+    child.on('error', (error) => {
+      rejectOnce(error);
+    });
+    child.on('close', (code, signal) => {
+      if (code !== 0) {
+        const signalContext = signal ? `signal=${signal}` : null;
+        const exitContext = `exit_code=${code}`;
+        const stderrContext = stderr.trim() || null;
+        rejectOnce(new Error([stderrContext, signalContext, exitContext].filter(Boolean).join(' | ')));
+        return;
+      }
+
+      try {
+        resolveOnce(collector.finish());
+      } catch (error) {
+        rejectOnce(error);
+      }
+    });
+  });
 }
 
 async function attachEmbeddings(records) {
@@ -430,7 +587,7 @@ async function runIndexCommand(options) {
   }
 
   const indexedRecords = changedFiles.length > 0
-    ? await attachEmbeddings(runSemanticIndexer(rootDir, changedFiles.map((file) => file.absolutePath)))
+    ? await attachEmbeddings(await runSemanticIndexer(rootDir, changedFiles.map((file) => file.absolutePath)))
     : [];
 
   const nextEntries = mergeIndexedEntries(
@@ -543,6 +700,7 @@ module.exports = {
   ensureWithinWorkspace,
   evaluateQueries,
   mergeIndexedEntries,
+  createJsonLineCollector,
   rankEntryPoints,
   rankEntryPointsByKeyword,
   resolveRequestedFiles,

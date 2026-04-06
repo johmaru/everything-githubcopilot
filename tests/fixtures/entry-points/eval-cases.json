@@ -16,6 +16,6 @@
   },
   {
     "query": "extract symbols from source with language tree sitter typescript python rust",
-    "expected": { "file_path": "rust/semantic-indexer/src/lib.rs", "name": "extract_symbols_from_source_with_language" }
+    "expected": { "file_path": "rust/semantic-indexer/src/indexer.rs", "name": "extract_symbols_from_source_with_language" }
   }
 ]
