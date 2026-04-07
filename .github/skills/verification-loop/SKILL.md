@@ -26,11 +26,13 @@ description: >
 - hook / schema 変更: `node scripts/ci/validate-github-hooks.js`
 - 個人パス混入確認: `node scripts/ci/validate-no-personal-paths.js`
 - Markdown 変更: `npx markdownlint <touched files>`
-- 全体確認: `npm test` と `npm run lint`
+- 最終確認: `npm test` と `npm run lint`
 
 ## 適用の目安
-- `.github/` 配下や `README.md` を触ったら、まず validator と markdownlint を実行し、/verify では最終的に `npm test` と `npm run lint` まで広げる
-- `scripts/` や `tests/` を触ったら、最終確認で `npm test` を省略しない
+- 各ステップでは保存確認、diagnostics、最小の validator、変更面に直結する focused test を先に実行し、広い回帰確認は最後まで遅延させる
+- `.github/` 配下や `README.md` を触ったら、まず validator と markdownlint を実行し、`npm test` と `npm run lint` は最終確認または high-risk 変更の closeout で実行する
+- `scripts/` や `tests/` を触ったら、各ステップでは関連テストを先に実行し、最終確認で `npm test` を省略しない
+- hook / schema / package metadata / installer / workspace instruction の変更は high-risk として扱い、最終確認で広い回帰確認を省略しない
 
 ## /verify での既定
 - 現在の変更セットを対象に、保存確認、diagnostics、関連テスト、広い回帰確認を順に報告する

@@ -41,6 +41,7 @@ handoffs:
 - **部分読取で全体を判断しない。** ファイルを読んだら必ず
   `[読取: total_lines=XXX, showing=YY-ZZ]` を記載し、
   未読部分がある場合は追加で読む。
+- **repo 内の構造探索では静的参照を優先する。** 依存関係の追跡、rename 影響調査、dead export 確認、責務の横断把握では `#search/usages` を先に使い、`#search/textSearch` は生文字列確認の補助に限定する。
 - **実装が必要な場合は planner にハンドオフ。** 実装計画が必要になった時点で、
   planner に引き継ぐ。
 - **深い調査が必要な場合は researcher にハンドオフ。** コードベースの詳細調査が
@@ -61,7 +62,7 @@ supporter は以下の用途に最適です：
 ### Phase 1 — コンテキスト収集
 
 1. `#search/codebase` で関連ファイル・シンボルを特定
-2. `#search/usages` で依存関係と使用箇所を把握
+2. `#search/usages` で依存関係と使用箇所を把握し、実参照ベースで影響範囲を固める
 3. `#read/readFile` で関連コードを精読
 4. `#search/changes` で直近の変更履歴を確認
 5. `#read/problems` で既存の問題を確認

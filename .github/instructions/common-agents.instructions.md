@@ -29,12 +29,12 @@ These agents have `user-invocable: false` and are explicitly invoked by core age
 |-------|---------|-------------|
 | architect | System design | Architectural decisions |
 | tdd-guide | Test-driven development | New features, bug fixes |
-| code-reviewer | Code review | After writing code |
+| code-reviewer | Code review | High-risk or cross-cutting repository changes |
 | security-reviewer | Security analysis | Before commits |
 | build-error-resolver | Fix build errors | When build fails |
 | e2e-runner | E2E testing | Critical user flows |
 | refactor-cleaner | Dead code cleanup | Code maintenance |
-| safety-checker | Post-edit safety review | Immediately after risky edits |
+| safety-checker | Post-edit safety review | Immediately after high-risk edits |
 | agent-auditor | Agent file auditing | Checking agent definitions for structural issues |
 | best-practice-researcher | Research best practices | Before implementing new features |
 | code-structure-auditor | Structural integrity auditing | Detecting broken imports, dead exports, invalid JSON |
@@ -51,9 +51,11 @@ These agents have `user-invocable: false` and are explicitly invoked by core age
 
 No user prompt needed:
 1. Complex feature requests - Use **planner** agent
-2. Code just written/modified - Explicitly invoke **code-reviewer** from the active core agent or prompt
+2. High-risk code just written/modified - Explicitly invoke **code-reviewer** from the active core agent or prompt
 3. Bug fix or new feature - Explicitly invoke **tdd-guide** from the active core agent or prompt
 4. Architectural decision - Explicitly invoke **architect** from the active core agent or prompt
+
+High-risk changes include `.github/copilot-instructions.md`, `AGENTS.md`, `.github/agents/**`, `.github/instructions/**`, `.github/prompts/**`, `.github/skills/**`, `.github/hooks/**`, `scripts/hooks/**`, `scripts/installer/**`, `package.json`, validators, schemas, and security-sensitive automation.
 
 ## Parallel Task Execution
 

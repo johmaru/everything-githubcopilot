@@ -80,5 +80,39 @@
       "failureType": "validation_type_mismatch",
       "blockedReason": "unsafe_type_mismatch"
     }
+  },
+  {
+    "name": "ast usages alias sample",
+    "toolName": "vscode_listCodeUsages",
+    "toolInput": {
+      "symbol_name": "buildCorrectionPlan",
+      "file_path": "tests/hooks/tool-call-correction.test.js",
+      "line_content": "const plan = correction.buildCorrectionPlan({"
+    },
+    "expected": {
+      "status": "suggested",
+      "failureType": "validation_alias_match",
+      "correctedInput": {
+        "symbol": "buildCorrectionPlan",
+        "filePath": "tests/hooks/tool-call-correction.test.js",
+        "lineContent": "const plan = correction.buildCorrectionPlan({"
+      }
+    }
+  },
+  {
+    "name": "ast usages missing location sample",
+    "toolName": "vscode_listCodeUsages",
+    "toolInput": {
+      "symbol_name": "buildCorrectionPlan",
+      "line_content": "const plan = correction.buildCorrectionPlan({"
+    },
+    "expected": {
+      "status": "blocked",
+      "failureType": "validation_missing_required",
+      "blockedReason": "missing_required_value",
+      "missingRequired": [
+        "filePath|uri"
+      ]
+    }
   }
 ]

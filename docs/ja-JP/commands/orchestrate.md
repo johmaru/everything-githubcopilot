@@ -35,7 +35,7 @@ coder -> researcher
 安全なリファクタリングワークフロー:
 
 ```
-planner -> coder
+planner -> coder -> researcher
 ```
 
 ### security
@@ -43,7 +43,7 @@ planner -> coder
 セキュリティ重視のレビュー:
 
 ```
-coder -> security-reviewer
+planner -> coder -> researcher + security-reviewer
 ```
 
 ## 四層エージェントアーキテクチャ
@@ -128,10 +128,10 @@ coder -> security-reviewer
    - 出力: `HANDOFF: coder → researcher` または `HANDOFF: coder → (完了)`
 
 3. **Researcherエージェント** (GPT-5.4 mini, 読み取り専用)
-   - 深いコードベース調査
-   - 依存関係の追跡
-   - 結果をcoderに報告
-   - 出力: 調査結果（coderに戻る）
+   - 変更差分の read-only review
+   - 回帰とリスクの確認
+   - 必要に応じて追加調査を実施
+   - 出力: レビュー結果
 
 ### 検証ループ（Coderエージェント）
 
@@ -196,7 +196,7 @@ RECOMMENDATION
 
 同時に実行:
 
-- code-reviewer (品質)
+- code-reviewer (高リスク変更の品質レビュー)
 - security-reviewer (セキュリティ)
 - architect (設計)
 
@@ -218,13 +218,13 @@ $ARGUMENTS:
 ## カスタムワークフローの例
 
 ```
-/orchestrate custom "architect,tdd-guide,code-reviewer" "Redesign caching layer"
+/orchestrate custom "architect,tdd-guide,researcher" "Redesign caching layer"
 ```
 
 ## ヒント
 
 1. 複雑な機能には**plannerから始める**
-2. マージ前に**常にcode-reviewerを含める**
+2. 高リスク変更では**code-reviewerを含める**
 3. 認証/決済/個人情報には**security-reviewerを使用**
 4. **ハンドオフを簡潔に保つ** - 次のエージェントが必要とするものに焦点を当てる
 5. 必要に応じて**エージェント間で検証を実行**

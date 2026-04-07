@@ -8,15 +8,15 @@ OpenCode is an alternative CLI for AI-assisted development that supports **all**
 
 ## Key Differences
 
-| Feature | Claude Code | OpenCode | Notes |
-|---------|-------------|----------|-------|
-| Configuration | `CLAUDE.md`, `plugin.json` | `opencode.json` | Different file formats |
-| Agents | Markdown frontmatter | JSON object | Full parity |
-| Commands | `commands/*.md` | `command` object or `.md` files | Full parity |
-| Skills | `skills/*/SKILL.md` | `instructions` array | Loaded as context |
-| **Hooks** | `hooks.json` (3 phases) | **Plugin system (20+ events)** | **Full parity + more!** |
-| Rules | `rules/*.md` | `instructions` array | Consolidated or separate |
-| MCP | Full support | Full support | Full parity |
+| Feature       | Claude Code                | OpenCode                        | Notes                    |
+| ------------- | -------------------------- | ------------------------------- | ------------------------ |
+| Configuration | `CLAUDE.md`, `plugin.json` | `opencode.json`                 | Different file formats   |
+| Agents        | Markdown frontmatter       | JSON object                     | Full parity              |
+| Commands      | `commands/*.md`            | `command` object or `.md` files | Full parity              |
+| Skills        | `skills/*/SKILL.md`        | `instructions` array            | Loaded as context        |
+| **Hooks**     | `hooks.json` (3 phases)    | **Plugin system (20+ events)**  | **Full parity + more!**  |
+| Rules         | `rules/*.md`               | `instructions` array            | Consolidated or separate |
+| MCP           | Full support               | Full support                    | Full parity              |
 
 ## Hook Migration
 
@@ -24,58 +24,68 @@ OpenCode is an alternative CLI for AI-assisted development that supports **all**
 
 ### Hook Event Mapping
 
-| Claude Code Hook | OpenCode Plugin Event | Notes |
-|-----------------|----------------------|-------|
-| `PreToolUse` | `tool.execute.before` | Can modify tool input |
-| `PostToolUse` | `tool.execute.after` | Can modify tool output |
-| `Stop` | `session.idle` or `session.status` | Session lifecycle |
-| `SessionStart` | `session.created` | Session begins |
-| `SessionEnd` | `session.deleted` | Session ends |
-| N/A | `file.edited` | OpenCode-only: file changes |
-| N/A | `file.watcher.updated` | OpenCode-only: file system watch |
-| N/A | `message.updated` | OpenCode-only: message changes |
-| N/A | `lsp.client.diagnostics` | OpenCode-only: LSP integration |
-| N/A | `tui.toast.show` | OpenCode-only: notifications |
+| Claude Code Hook | OpenCode Plugin Event              | Notes                            |
+| ---------------- | ---------------------------------- | -------------------------------- |
+| `PreToolUse`     | `tool.execute.before`              | Can modify tool input            |
+| `PostToolUse`    | `tool.execute.after`               | Can modify tool output           |
+| `Stop`           | `session.idle` or `session.status` | Session lifecycle                |
+| `SessionStart`   | `session.created`                  | Session begins                   |
+| `SessionEnd`     | `session.deleted`                  | Session ends                     |
+| N/A              | `file.edited`                      | OpenCode-only: file changes      |
+| N/A              | `file.watcher.updated`             | OpenCode-only: file system watch |
+| N/A              | `message.updated`                  | OpenCode-only: message changes   |
+| N/A              | `lsp.client.diagnostics`           | OpenCode-only: LSP integration   |
+| N/A              | `tui.toast.show`                   | OpenCode-only: notifications     |
 
 ### Converting Hooks to Plugins
 
 **Claude Code hook (hooks.json):**
+
 ```json
 {
-  "PostToolUse": [{
-    "matcher": "tool == \"Edit\" && tool_input.file_path matches \"\\\\.(ts|tsx|js|jsx)$\"",
-    "hooks": [{
-      "type": "command",
-      "command": "prettier --write \"$file_path\""
-    }]
-  }]
+  "PostToolUse": [
+    {
+      "matcher": "tool == \"Edit\" && tool_input.file_path matches \"\\\\.(ts|tsx|js|jsx)$\"",
+      "hooks": [
+        {
+          "type": "command",
+          "command": "prettier --write \"$file_path\""
+        }
+      ]
+    }
+  ]
 }
 ```
 
 **OpenCode plugin (.opencode/plugins/prettier-hook.ts):**
+
 ```typescript
 export const PrettierPlugin = async ({ $ }) => {
   return {
-    "file.edited": async (event) => {
+    'file.edited': async event => {
       if (event.path.match(/\.(ts|tsx|js|jsx)$/)) {
-        await $`prettier --write ${event.path}`
+        await $`prettier --write ${event.path}`;
       }
     }
-  }
-}
+  };
+};
 ```
 
 ### ECC Plugin Hooks Included
 
 The ECC OpenCode configuration includes translated hooks:
 
-| Hook | OpenCode Event | Purpose |
-|------|----------------|---------|
-| Prettier auto-format | `file.edited` | Format JS/TS files after edit |
-| TypeScript check | `tool.execute.after` | Run tsc after editing .ts files |
-| console.log warning | `file.edited` | Warn about console.log statements |
-| Session notification | `session.idle` | Notify when task completes |
-| Security check | `tool.execute.before` | Check for secrets before commit |
+Platform caveat: the current legacy hook implementation still assumes POSIX-style shell commands and macOS notifications in several paths. On Windows, some reminder/audit hooks are best-effort unless you run under WSL/Git Bash or adapt the plugin commands.
+
+| Hook                          | OpenCode Event        | Purpose                                                            |
+| ----------------------------- | --------------------- | ------------------------------------------------------------------ |
+| Prettier auto-format          | `file.edited`         | Format JS/TS files after edit in `strict` profile                  |
+| TypeScript check              | `tool.execute.after`  | Run tsc after editing .ts files in `strict` profile                |
+| console.log warning           | `file.edited`         | Warn about console.log statements in `standard` and `strict`       |
+| Session notification          | `session.idle`        | Notify when task completes                                         |
+| Git push reminder             | `tool.execute.before` | Remind to review before `git push` in `strict`                     |
+| Doc file warning              | `tool.execute.before` | Warn when creating ad-hoc docs in `standard` and `strict`          |
+| Long-running command reminder | `tool.execute.before` | Suggest background execution for installs/builds/tests in `strict` |
 
 ## Migration Steps
 
@@ -102,10 +112,10 @@ The `.opencode/` directory in this repository contains the translated configurat
 │   ├── run-tests.ts           # Run test suite
 │   ├── check-coverage.ts      # Check coverage
 │   └── security-audit.ts      # npm audit wrapper
-├── commands/                  # All 23 commands (markdown)
+├── commands/                  # 26 configured commands (markdown)
 │   ├── plan.md
 │   ├── tdd.md
-│   └── ... (21 more)
+│   └── ... (24 more)
 ├── prompts/
 │   └── agents/                # Agent prompt files (12)
 ├── instructions/
@@ -129,11 +139,12 @@ opencode
 ### Agents
 
 **Claude Code:**
+
 ```markdown
 ---
 name: planner
 description: Expert planning specialist...
-tools: ["Read", "Grep", "Glob"]
+tools: ['Read', 'Grep', 'Glob']
 model: opus
 ---
 
@@ -141,6 +152,7 @@ You are an expert planning specialist...
 ```
 
 **OpenCode:**
+
 ```json
 {
   "agent": {
@@ -158,6 +170,7 @@ You are an expert planning specialist...
 ### Commands
 
 **Claude Code:**
+
 ```markdown
 ---
 name: plan
@@ -168,6 +181,7 @@ Create a detailed implementation plan for: {input}
 ```
 
 **OpenCode (JSON):**
+
 ```json
 {
   "command": {
@@ -181,6 +195,7 @@ Create a detailed implementation plan for: {input}
 ```
 
 **OpenCode (Markdown - .opencode/commands/plan.md):**
+
 ```markdown
 ---
 description: Create implementation plan
@@ -195,13 +210,10 @@ Create a detailed implementation plan for: $ARGUMENTS
 **Claude Code:** Skills are loaded from `skills/*/SKILL.md` files.
 
 **OpenCode:** Skills are added to the `instructions` array:
+
 ```json
 {
-  "instructions": [
-    "skills/tdd-workflow/SKILL.md",
-    "skills/security-review/SKILL.md",
-    "skills/coding-standards/SKILL.md"
-  ]
+  "instructions": ["skills/tdd-workflow/SKILL.md", "skills/security-review/SKILL.md", "skills/coding-standards/SKILL.md"]
 }
 ```
 
@@ -210,73 +222,72 @@ Create a detailed implementation plan for: $ARGUMENTS
 **Claude Code:** Rules are in separate `rules/*.md` files.
 
 **OpenCode:** Rules can be consolidated into `instructions` or kept separate:
+
 ```json
 {
-  "instructions": [
-    "instructions/INSTRUCTIONS.md",
-    "rules/common/security.md",
-    "rules/common/coding-style.md"
-  ]
+  "instructions": ["instructions/INSTRUCTIONS.md", "rules/common/security.md", "rules/common/coding-style.md"]
 }
 ```
 
 ## Model Mapping
 
-| Claude Code | OpenCode |
-|-------------|----------|
-| `opus` | `anthropic/claude-opus-4-5` |
-| `sonnet` | `anthropic/claude-sonnet-4-5` |
-| `haiku` | `anthropic/claude-haiku-4-5` |
+| Claude Code | OpenCode                      |
+| ----------- | ----------------------------- |
+| `opus`      | `anthropic/claude-opus-4-5`   |
+| `sonnet`    | `anthropic/claude-sonnet-4-5` |
+| `haiku`     | `anthropic/claude-haiku-4-5`  |
 
 ## Available Commands
 
-After migration, ALL 23 commands are available:
+After migration, 26 configured commands are available:
 
-| Command | Description |
-|---------|-------------|
-| `/plan` | Create implementation plan |
-| `/tdd` | Enforce TDD workflow |
-| `/code-review` | Review code changes |
-| `/security` | Run security review |
-| `/build-fix` | Fix build errors |
-| `/e2e` | Generate E2E tests |
-| `/refactor-clean` | Remove dead code |
-| `/orchestrate` | Multi-agent workflow |
-| `/learn` | Extract patterns mid-session |
-| `/checkpoint` | Save verification state |
-| `/verify` | Run verification loop |
-| `/eval` | Run evaluation |
-| `/update-docs` | Update documentation |
-| `/update-codemaps` | Update codemaps |
-| `/test-coverage` | Check test coverage |
-| `/setup-pm` | Configure package manager |
-| `/go-review` | Go code review |
-| `/go-test` | Go TDD workflow |
-| `/go-build` | Fix Go build errors |
-| `/skill-create` | Generate skills from git history |
-| `/instinct-status` | View learned instincts |
-| `/instinct-import` | Import instincts |
-| `/instinct-export` | Export instincts |
-| `/evolve` | Cluster instincts into skills |
-| `/promote` | Promote project instincts to global scope |
-| `/projects` | List known projects and instinct stats |
+| Command            | Description                               |
+| ------------------ | ----------------------------------------- |
+| `/plan`            | Create implementation plan                |
+| `/tdd`             | Enforce TDD workflow                      |
+| `/code-review`     | Review high-risk or cross-cutting changes |
+| `/security`        | Run security review                       |
+| `/build-fix`       | Fix build errors                          |
+| `/e2e`             | Generate E2E tests                        |
+| `/refactor-clean`  | Remove dead code                          |
+| `/orchestrate`     | Multi-agent workflow                      |
+| `/learn`           | Extract patterns mid-session              |
+| `/checkpoint`      | Save verification state                   |
+| `/verify`          | Run verification loop                     |
+| `/eval`            | Run evaluation                            |
+| `/update-docs`     | Update documentation                      |
+| `/update-codemaps` | Update codemaps                           |
+| `/test-coverage`   | Check test coverage                       |
+| `/setup-pm`        | Configure package manager                 |
+| `/go-review`       | Go code review                            |
+| `/go-test`         | Go TDD workflow                           |
+| `/go-build`        | Fix Go build errors                       |
+| `/skill-create`    | Generate skills from git history          |
+| `/instinct-status` | View learned instincts                    |
+| `/instinct-import` | Import instincts                          |
+| `/instinct-export` | Export instincts                          |
+| `/evolve`          | Cluster instincts into skills             |
+| `/promote`         | Promote project instincts to global scope |
+| `/projects`        | List known projects and instinct stats    |
 
 ## Available Agents
 
-| Agent | Description |
-|-------|-------------|
-| `planner` | Implementation planning |
-| `architect` | System design |
-| `code-reviewer` | Code review |
-| `security-reviewer` | Security analysis |
-| `tdd-guide` | Test-driven development |
-| `build-error-resolver` | Fix build errors |
-| `e2e-runner` | E2E testing |
-| `doc-updater` | Documentation |
-| `refactor-cleaner` | Dead code cleanup |
-| `go-reviewer` | Go code review |
-| `go-build-resolver` | Go build errors |
-| `database-reviewer` | Database optimization |
+| Agent                  | Description                       |
+| ---------------------- | --------------------------------- |
+| `planner`              | Implementation planning           |
+| `architect`            | System design                     |
+| `code-reviewer`        | High-risk or cross-cutting review |
+| `security-reviewer`    | Security analysis                 |
+| `tdd-guide`            | Test-driven development           |
+| `build-error-resolver` | Fix build errors                  |
+| `e2e-runner`           | E2E testing                       |
+| `doc-updater`          | Documentation and codemap updates |
+| `refactor-cleaner`     | Dead code cleanup                 |
+| `go-reviewer`          | Go code review                    |
+| `go-build-resolver`    | Go build fixes                    |
+| `database-reviewer`    | PostgreSQL review                 |
+
+The `build` primary agent handles direct editing and execution work.
 
 ## Plugin Installation
 
@@ -291,6 +302,7 @@ npm install ecc-universal
 ```
 
 Then in your `opencode.json`:
+
 ```json
 {
   "plugin": ["ecc-universal"]
@@ -301,9 +313,12 @@ This only loads the published ECC OpenCode plugin module (hooks/events and expor
 It does **not** automatically inject ECC's full `agent`, `command`, or `instructions` config into your project.
 
 If you want the full ECC OpenCode workflow surface, use the repository's bundled `.opencode/opencode.json` as your base config or copy these pieces into your project:
+
 - `.opencode/commands/`
 - `.opencode/prompts/`
 - `.opencode/instructions/INSTRUCTIONS.md`
+- `AGENTS.md` and `CONTRIBUTING.md`
+- the referenced `skills/*` files used by the repo-local OpenCode instructions array
 - the `agent` and `command` sections from `.opencode/opencode.json`
 
 ## Troubleshooting
@@ -351,18 +366,19 @@ If you need to switch back:
 
 ## Feature Parity Summary
 
-| Feature | Claude Code | OpenCode | Status |
-|---------|-------------|----------|--------|
-| Agents | ✅ 12 agents | ✅ 12 agents | **Full parity** |
-| Commands | ✅ 23 commands | ✅ 23 commands | **Full parity** |
-| Skills | ✅ 16 skills | ✅ 16 skills | **Full parity** |
-| Hooks | ✅ 3 phases | ✅ 20+ events | **OpenCode has MORE** |
-| Rules | ✅ 8 rules | ✅ 8 rules | **Full parity** |
-| MCP Servers | ✅ Full | ✅ Full | **Full parity** |
-| Custom Tools | ✅ Via hooks | ✅ Native support | **OpenCode is better** |
+| Feature      | Claude Code                  | OpenCode                                        | Status                                    |
+| ------------ | ---------------------------- | ----------------------------------------------- | ----------------------------------------- |
+| Agents       | ✅ Specialized agent prompts | ✅ 13 total agents (1 primary + 12 specialized) | **OpenCode adds a primary build agent**   |
+| Commands     | ✅ Core workflow commands    | ✅ 26 configured commands                       | **OpenCode ships extra legacy utilities** |
+| Skills       | ✅ 16 skills                 | ✅ 16 skills                                    | **Full parity**                           |
+| Hooks        | ✅ 3 phases                  | ✅ 20+ events                                   | **OpenCode has MORE**                     |
+| Rules        | ✅ 8 rules                   | ✅ 8 rules                                      | **Full parity**                           |
+| MCP Servers  | ✅ Full                      | ✅ Full                                         | **Full parity**                           |
+| Custom Tools | ✅ Via hooks                 | ✅ Native support                               | **OpenCode is better**                    |
 
 ## Feedback
 
 For issues specific to:
+
 - **OpenCode CLI**: Report to OpenCode's issue tracker
 - **ECC Configuration**: Report to [github.com/johmaru/everything-githubcopilot](https://github.com/johmaru/everything-githubcopilot)

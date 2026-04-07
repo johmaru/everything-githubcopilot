@@ -207,6 +207,12 @@ function selectFailureType({ missingRequired, typeMismatches, appliedFixes }) {
   return 'valid';
 }
 
+function collectMissingConditionalRequired(schema, normalizedInput) {
+  return (schema.oneOfRequired || [])
+    .filter((group) => !group.some((field) => normalizedInput[field] !== undefined))
+    .map((group) => group.join('|'));
+}
+
 function buildNoSchemaPlan(toolName, modelProfile) {
   return {
     toolName,
@@ -319,9 +325,11 @@ function buildCorrectionPlan({ toolName, toolInput, modelProfile }) {
   }
 
   const missingRequired = schema.required.filter((field) => normalizedInput[field] === undefined);
-  const failureType = selectFailureType({ missingRequired, typeMismatches, appliedFixes });
+  const missingConditionalRequired = collectMissingConditionalRequired(schema, normalizedInput);
+  const missingFields = [...missingRequired, ...missingConditionalRequired];
+  const failureType = selectFailureType({ missingRequired: missingFields, typeMismatches, appliedFixes });
 
-  if (missingRequired.length > 0) {
+  if (missingFields.length > 0) {
     return {
       toolName,
       modelProfile: schema.modelProfile,
@@ -332,7 +340,7 @@ function buildCorrectionPlan({ toolName, toolInput, modelProfile }) {
       appliedFixes,
       suggestedFixes: [],
       blockedReason: 'missing_required_value',
-      missingRequired,
+      missingRequired: missingFields,
       typeMismatches,
     };
   }
@@ -348,7 +356,7 @@ function buildCorrectionPlan({ toolName, toolInput, modelProfile }) {
       appliedFixes,
       suggestedFixes: [],
       blockedReason: 'unsafe_type_mismatch',
-      missingRequired,
+      missingRequired: missingFields,
       typeMismatches,
     };
   }
@@ -363,7 +371,7 @@ function buildCorrectionPlan({ toolName, toolInput, modelProfile }) {
     appliedFixes,
     suggestedFixes: [],
     blockedReason: null,
-    missingRequired,
+    missingRequired: missingFields,
     typeMismatches,
   };
 }

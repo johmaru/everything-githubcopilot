@@ -122,7 +122,7 @@ scripts/hooks/                        ← フック実装スクリプト（23フ
 | `architect`                | システム設計           | アーキテクチャ決定時         |
 | `best-practice-researcher` | ベストプラクティス調査 | 実装前の調査                 |
 | `build-error-resolver`     | ビルドエラー修正       | ビルド失敗時                 |
-| `code-reviewer`            | コードレビュー         | コード変更後                 |
+| `code-reviewer`            | コードレビュー         | 高リスクまたは横断変更時     |
 | `docs-lookup`              | ドキュメント検索       | API・ライブラリ参照時        |
 | `e2e-runner`               | E2Eテスト              | クリティカルフロー検証       |
 | `go-reviewer`              | Go コードレビュー      | Go 変更時                    |
@@ -163,7 +163,7 @@ argument-hint: '引数の説明'
 | `/plan-and-implement` | planner                  | 計画から実装まで一括実行   |
 | `/architect`          | architect                | アーキテクチャレビュー     |
 | `/tdd`                | tdd-guide                | TDDワークフロー実行        |
-| `/code-review`        | code-reviewer            | 変更セットのレビュー       |
+| `/code-review`        | code-reviewer            | 高リスク変更のレビュー     |
 | `/review`             | researcher               | 汎用レビュー               |
 | `/build-fix`          | build-error-resolver     | ビルドエラーの修正         |
 | `/fix-test`           | build-error-resolver     | テスト失敗の修正           |
@@ -216,9 +216,9 @@ argument-hint: '引数の説明'
 | ------------------------ | --------------------------- | -------------------------------- |
 | `*`                      | `observe-tool.js`           | ツール利用の観測ログを記録       |
 | `Edit\|Write\|MultiEdit` | `quality-gate.js`           | 品質ゲートチェック（async、30s） |
-| `Edit`                   | `post-edit-format.js`       | JS/TSファイルの自動フォーマット  |
-| `Edit`                   | `post-edit-typecheck.js`    | TypeScriptチェック               |
-| `Edit`                   | `post-edit-console-warn.js` | `console.log` の存在を警告       |
+| `Edit\|Write\|MultiEdit` | `post-edit-format.js`       | JS/TSファイルの自動フォーマット  |
+| `Edit\|Write\|MultiEdit` | `post-edit-typecheck.js`    | TypeScriptチェック（async）      |
+| `Edit\|Write\|MultiEdit` | `post-edit-console-warn.js` | `console.log` の存在を警告       |
 
 #### SessionStart — セッション開始時
 
@@ -228,10 +228,11 @@ argument-hint: '引数の説明'
 
 #### Stop — セッション終了時
 
-| スクリプト                 | 動作                                   | タイムアウト |
-| -------------------------- | -------------------------------------- | ------------ |
-| `session-stop.js`          | セッション要約をSQLiteに永続化         | 10秒         |
-| `safety-backup.js cleanup` | 当該セッションの一時バックアップを削除 | 10秒         |
+| スクリプト                       | 動作                                   | タイムアウト |
+| -------------------------------- | -------------------------------------- | ------------ |
+| `session-stop.js`                | セッション要約をSQLiteに永続化         | 10秒         |
+| `safety-backup.js cleanup`       | 当該セッションの一時バックアップを削除 | 10秒         |
+| `post-edit-typecheck.js cleanup` | 非同期TypeScriptチェック状態を削除     | 10秒         |
 
 #### PreCompact — コンテキスト圧縮前
 

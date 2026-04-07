@@ -6,7 +6,7 @@ const { emit, fileExists, getContext, getFilePaths, runLocalBin, toWorkspacePath
 const context = getContext();
 const filePaths = [...new Set(getFilePaths(context)
   .map(toWorkspacePath)
-  .filter((filePath) => filePath && fileExists(filePath) && /\.(ts|tsx|js|jsx|json|md|css|scss|html|yml|yaml)$/i.test(filePath)))];
+  .filter((filePath) => filePath && fileExists(filePath) && /\.(ts|tsx|js|jsx)$/i.test(filePath)))];
 
 if (filePaths.length === 0) {
   process.exit(0);

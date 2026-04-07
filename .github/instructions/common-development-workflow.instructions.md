@@ -13,7 +13,8 @@ The Feature Implementation Workflow describes the development pipeline: research
 ## Feature Implementation Workflow
 
 0. **Research & Reuse** _(mandatory before any new implementation)_
-   - **GitHub code search first:** Run `gh search repos` and `gh search code` to find existing implementations, templates, and patterns before writing anything new.
+   - **Repo-internal dependency tracing first:** For dependency mapping, rename safety, symbol impact analysis, and ownership discovery inside this repository, use static exploration such as `#search/usages` before external search.
+   - **GitHub code search first for external reuse:** Run `gh search repos` and `gh search code` to find existing implementations, templates, and patterns before writing anything new outside the current repository.
    - **Library docs second:** Use Context7 or primary vendor docs to confirm API behavior, package usage, and version-specific details before implementing.
    - **Exa only when the first two are insufficient:** Use Exa for broader web research or discovery after GitHub search and primary docs.
    - **Check package registries:** Search npm, PyPI, crates.io, and other registries before writing utility code. Prefer battle-tested libraries over hand-rolled solutions.
@@ -34,7 +35,8 @@ The Feature Implementation Workflow describes the development pipeline: research
    - Verify 80%+ coverage
 
 3. **Code Review**
-   - Use **code-reviewer** agent immediately after writing code
+   - Keep **researcher** as the default implementation review in the planner -> coder -> researcher lane
+   - Use **code-reviewer** for high-risk changes such as workspace instructions, agents, file instructions, prompts, skills, hooks, installer scripts, package metadata, validators, schemas, or security-sensitive automation
    - Address CRITICAL and HIGH issues
    - Fix MEDIUM issues when possible
 

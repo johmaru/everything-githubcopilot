@@ -81,6 +81,26 @@ const TOOL_SCHEMAS = Object.freeze({
       },
     },
   },
+  vscode_listCodeUsages: {
+    required: ['symbol', 'lineContent'],
+    oneOfRequired: [['filePath', 'uri']],
+    properties: {
+      symbol: 'string',
+      uri: 'string',
+      filePath: 'string',
+      lineContent: 'string',
+    },
+    aliases: {
+      symbol_name: 'symbol',
+      symbolName: 'symbol',
+      file_path: 'filePath',
+      file: 'filePath',
+      path: 'filePath',
+      file_uri: 'uri',
+      line_content: 'lineContent',
+      line_text: 'lineContent',
+    },
+  },
 });
 
 function cloneSchema(schema) {
@@ -90,6 +110,7 @@ function cloneSchema(schema) {
 
   return {
     required: [...(schema.required || [])],
+    oneOfRequired: (schema.oneOfRequired || []).map((group) => [...group]),
     properties: { ...(schema.properties || {}) },
     aliases: { ...(schema.aliases || {}) },
     profiles: { ...(schema.profiles || {}) },

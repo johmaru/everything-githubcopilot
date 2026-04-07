@@ -24,9 +24,16 @@ On failure: **coder → (handoff) → planner (re-plan)**
 - Use **planner** before touching critical systems. It must never call `#edit/*` or destructive terminal commands.
 - Use **coder** for implementation. It follows planner's output step by step and runs the verification loop after every change.
 - **researcher** is user-visible and can be called directly for deep investigation. The planner/coder -> researcher path is part of the current workflow, while broader internal specialist auto-selection remains future work.
+- Use **code-reviewer** only for high-risk or cross-cutting repository changes such as workspace instructions, agents, file instructions, prompts, skills, hooks, installer scripts, package metadata, validators, schemas, or security-sensitive automation. Keep researcher as the default implementation review path.
 - Use **supporter** when you want AI assistance without any file edits. It provides safer guidance, clarifies requirements, investigates the codebase, and can handoff to planner or researcher when needed. **supporter never edits files or runs commands.**
 - Do not bypass the verification loop. coder must confirm ✅ on save / syntax / test / regression before reporting done.
 - Do not skip truncation guards. Every file read must note `[読取: total_lines=X, showing=Y-Z]`.
+
+## Code Exploration
+
+- For repo-internal dependency tracing, symbol impact analysis, rename safety checks, dead export checks, and cross-file responsibility mapping, prefer `#search/usages` before plain text search. Treat it as the primary static reference search surface.
+- Use `#search/codebase` or text search to discover rough candidate files, then use `#search/usages` to confirm actual references and call paths.
+- Reserve GitHub code search and broader external research for reuse and library discovery, not for primary dependency tracing inside this repository.
 
 ## Skills (ForgeCode Optimizations)
 

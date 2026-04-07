@@ -3,7 +3,7 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 
-const { getDependencyInstallPlan, installDependencies } = require('../../scripts/installer/project-setup');
+const { getDependencyInstallPlan, getDependencyUninstallPlan, installDependencies } = require('../../scripts/installer/project-setup');
 const packageJson = require('../../package.json');
 
 function test(name, fn) {
@@ -155,6 +155,38 @@ results.push(test('npm is the default when no package manager hints exist', () =
     assert.strictEqual(plan.packageManager, 'npm');
     assert.strictEqual(plan.command, `npm install --no-audit --no-fund ${expectedDependencies}`);
     assert.strictEqual(plan.needsPackageJson, true);
+  } finally {
+    cleanupTestDir(targetDir);
+  }
+}));
+
+results.push(test('dependency uninstall uses the detected package manager remove command', () => {
+  const targetDir = createTestDir('egc-project-bootstrap-');
+
+  try {
+    fs.writeFileSync(path.join(targetDir, 'package.json'), JSON.stringify({
+      private: true,
+      packageManager: 'pnpm@9.0.0',
+    }, null, 2));
+    fs.writeFileSync(path.join(targetDir, 'pnpm-workspace.yaml'), 'packages:\n  - packages/*\n');
+
+    const plan = getDependencyUninstallPlan(targetDir);
+
+    assert.strictEqual(plan.packageManager, 'pnpm');
+    assert.strictEqual(plan.command, `pnpm remove -w ${expectedDependencies}`);
+  } finally {
+    cleanupTestDir(targetDir);
+  }
+}));
+
+results.push(test('dependency uninstall falls back to npm remove when no package manager hints exist', () => {
+  const targetDir = createTestDir('egc-project-bootstrap-');
+
+  try {
+    const plan = getDependencyUninstallPlan(targetDir);
+
+    assert.strictEqual(plan.packageManager, 'npm');
+    assert.strictEqual(plan.command, `npm uninstall --no-audit --no-fund ${expectedDependencies}`);
   } finally {
     cleanupTestDir(targetDir);
   }

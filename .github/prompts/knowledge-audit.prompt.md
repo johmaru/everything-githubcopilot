@@ -7,6 +7,8 @@ argument-hint: "Optionally scope the audit to a specific area such as instructio
 
 Use [the repository-wide instructions](../copilot-instructions.md) and the relevant instruction files in [../instructions](../instructions).
 
+This prompt is for repository knowledge maintenance only. Do not use it as a substitute for the default `researcher` implementation review, high-risk `code-reviewer` review, or `/verify`.
+
 1. Scan the specified scope, or all knowledge assets when no scope is provided.
 2. Look for these issue classes:
    - **Staleness** — guidance that references removed files, outdated APIs, or deprecated patterns.

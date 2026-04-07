@@ -187,6 +187,34 @@ function writeJson(filePath, value) {
   fs.writeFileSync(filePath, JSON.stringify(value, null, 2));
 }
 
+function writeRepoFixture(testDir, relativePath, transform = (source) => source) {
+  const sourcePath = path.join(repoRoot, ...relativePath.split('/'));
+  const destinationPath = path.join(testDir, ...relativePath.split('/'));
+  const source = fs.readFileSync(sourcePath, 'utf8');
+  fs.mkdirSync(path.dirname(destinationPath), { recursive: true });
+  fs.writeFileSync(destinationPath, transform(source), 'utf8');
+}
+
+function writeReviewRoutingFixture(testDir, overrides = {}) {
+  const fixtureFiles = [
+    '.github/copilot-instructions.md',
+    '.github/instructions/common-agents.instructions.md',
+    '.github/instructions/common-development-workflow.instructions.md',
+    '.github/prompts/knowledge-audit.prompt.md',
+    '.github/prompts/verify.prompt.md',
+    '.github/agents/planner.agent.md',
+    '.github/agents/coder.agent.md',
+    '.github/agents/researcher.agent.md',
+    '.github/agents/supporter.agent.md',
+    '.github/agents/safety-checker.agent.md',
+    '.github/agents/knowledge-curator.agent.md',
+  ];
+
+  for (const relativePath of fixtureFiles) {
+    writeRepoFixture(testDir, relativePath, overrides[relativePath]);
+  }
+}
+
 function normalizeHookCommand(command) {
   if (typeof command === 'string') {
     return command;
@@ -435,6 +463,186 @@ results.push(test('validate-copilot-customizations accepts inline tools list wit
     });
 
     assert.strictEqual(result.code, 0, result.stderr);
+  } finally {
+    cleanupTestDir(testDir);
+  }
+}));
+
+results.push(test('validate-copilot-customizations enforces the root review-routing contract anchors', () => {
+  const testDir = createTestDir();
+  try {
+    writeReviewRoutingFixture(testDir, {
+      '.github/instructions/common-development-workflow.instructions.md': (source) => source.replace(
+        'Keep **researcher** as the default implementation review in the planner -> coder -> researcher lane',
+        'Keep **code-reviewer** as the default implementation review after every implementation change'
+      ),
+    });
+
+    const result = runValidatorWithOverrides('validate-copilot-customizations', {
+      ROOT: testDir,
+      GITHUB_DIR: path.join(testDir, '.github'),
+      COPILOT_INSTRUCTIONS: path.join(testDir, '.github', 'copilot-instructions.md'),
+      INSTRUCTIONS_DIR: path.join(testDir, '.github', 'instructions'),
+      PROMPTS_DIR: path.join(testDir, '.github', 'prompts'),
+      AGENTS_DIR: path.join(testDir, '.github', 'agents'),
+      COMMON_AGENTS_INSTRUCTIONS: path.join(testDir, '.github', 'instructions', 'common-agents.instructions.md'),
+      COMMON_DEVELOPMENT_WORKFLOW: path.join(testDir, '.github', 'instructions', 'common-development-workflow.instructions.md'),
+      KNOWLEDGE_AUDIT_PROMPT: path.join(testDir, '.github', 'prompts', 'knowledge-audit.prompt.md'),
+      VERIFY_PROMPT: path.join(testDir, '.github', 'prompts', 'verify.prompt.md'),
+      CODER_AGENT: path.join(testDir, '.github', 'agents', 'coder.agent.md'),
+      SAFETY_CHECKER_AGENT: path.join(testDir, '.github', 'agents', 'safety-checker.agent.md'),
+    });
+
+    assert.strictEqual(result.code, 1, result.stderr);
+    const errorLines = result.stderr.trim().split(/\r?\n/).filter(Boolean);
+    assert.strictEqual(errorLines.length, 1, result.stderr);
+    assert.ok(errorLines[0].includes('P1-009'), 'validator must report the review-routing contract rule id');
+    assert.ok(errorLines[0].includes('common-development-workflow.instructions.md'), 'validator must identify the broken source-of-truth workflow file');
+  } finally {
+    cleanupTestDir(testDir);
+  }
+}));
+
+results.push(test('validate-copilot-customizations enforces high-risk-only safety boundary anchors', () => {
+  const testDir = createTestDir();
+  try {
+    writeReviewRoutingFixture(testDir, {
+      '.github/agents/safety-checker.agent.md': (source) => source
+        .replace(
+          'Use immediately after high-risk coder edits to inspect risky changes, flag unsafe areas, and create temporary backups for suspicious files before verification.',
+          'Use after coder edits to inspect risky changes before verification.'
+        )
+        .replace(
+          'This review runs immediately after high-risk coder edits, before the verification loop resumes.',
+          'This review runs after coder edits.'
+        ),
+    });
+
+    const result = runValidatorWithOverrides('validate-copilot-customizations', {
+      ROOT: testDir,
+      GITHUB_DIR: path.join(testDir, '.github'),
+      COPILOT_INSTRUCTIONS: path.join(testDir, '.github', 'copilot-instructions.md'),
+      INSTRUCTIONS_DIR: path.join(testDir, '.github', 'instructions'),
+      PROMPTS_DIR: path.join(testDir, '.github', 'prompts'),
+      AGENTS_DIR: path.join(testDir, '.github', 'agents'),
+      COMMON_AGENTS_INSTRUCTIONS: path.join(testDir, '.github', 'instructions', 'common-agents.instructions.md'),
+      COMMON_DEVELOPMENT_WORKFLOW: path.join(testDir, '.github', 'instructions', 'common-development-workflow.instructions.md'),
+      KNOWLEDGE_AUDIT_PROMPT: path.join(testDir, '.github', 'prompts', 'knowledge-audit.prompt.md'),
+      VERIFY_PROMPT: path.join(testDir, '.github', 'prompts', 'verify.prompt.md'),
+      CODER_AGENT: path.join(testDir, '.github', 'agents', 'coder.agent.md'),
+      SAFETY_CHECKER_AGENT: path.join(testDir, '.github', 'agents', 'safety-checker.agent.md'),
+    });
+
+    assert.strictEqual(result.code, 1, result.stderr);
+    const errorLines = result.stderr.trim().split(/\r?\n/).filter(Boolean);
+    assert.strictEqual(errorLines.length, 1, result.stderr);
+    assert.ok(errorLines[0].includes('P1-010'), 'validator must report the latency boundary rule id');
+    assert.ok(errorLines[0].includes('safety-checker.agent.md'), 'validator must identify the broken safety-checker contract file');
+  } finally {
+    cleanupTestDir(testDir);
+  }
+}));
+
+results.push(test('validate-copilot-customizations fails closed when a required review-routing contract file is missing', () => {
+  const testDir = createTestDir();
+  try {
+    writeReviewRoutingFixture(testDir);
+    fs.rmSync(path.join(testDir, '.github', 'prompts', 'knowledge-audit.prompt.md'));
+
+    const result = runValidatorWithOverrides('validate-copilot-customizations', {
+      ROOT: testDir,
+      GITHUB_DIR: path.join(testDir, '.github'),
+      COPILOT_INSTRUCTIONS: path.join(testDir, '.github', 'copilot-instructions.md'),
+      INSTRUCTIONS_DIR: path.join(testDir, '.github', 'instructions'),
+      PROMPTS_DIR: path.join(testDir, '.github', 'prompts'),
+      AGENTS_DIR: path.join(testDir, '.github', 'agents'),
+      COMMON_AGENTS_INSTRUCTIONS: path.join(testDir, '.github', 'instructions', 'common-agents.instructions.md'),
+      COMMON_DEVELOPMENT_WORKFLOW: path.join(testDir, '.github', 'instructions', 'common-development-workflow.instructions.md'),
+      KNOWLEDGE_AUDIT_PROMPT: path.join(testDir, '.github', 'prompts', 'knowledge-audit.prompt.md'),
+      VERIFY_PROMPT: path.join(testDir, '.github', 'prompts', 'verify.prompt.md'),
+      CODER_AGENT: path.join(testDir, '.github', 'agents', 'coder.agent.md'),
+      SAFETY_CHECKER_AGENT: path.join(testDir, '.github', 'agents', 'safety-checker.agent.md'),
+    });
+
+    assert.strictEqual(result.code, 1, result.stderr);
+    assert.ok(result.stderr.includes('P1-010'), 'validator must fail with the knowledge-audit boundary rule id');
+    assert.ok(result.stderr.includes('knowledge-audit.prompt.md'), 'validator must identify the missing contract file');
+  } finally {
+    cleanupTestDir(testDir);
+  }
+}));
+
+results.push(test('validate-copilot-customizations still fails closed when every review-routing signal file is deleted but the root lane remains', () => {
+  const testDir = createTestDir();
+  try {
+    writeReviewRoutingFixture(testDir);
+    fs.rmSync(path.join(testDir, '.github', 'instructions', 'common-agents.instructions.md'));
+    fs.rmSync(path.join(testDir, '.github', 'instructions', 'common-development-workflow.instructions.md'));
+    fs.rmSync(path.join(testDir, '.github', 'prompts', 'knowledge-audit.prompt.md'));
+    fs.rmSync(path.join(testDir, '.github', 'prompts', 'verify.prompt.md'));
+    fs.rmSync(path.join(testDir, '.github', 'agents', 'safety-checker.agent.md'));
+
+    const result = runValidatorWithOverrides('validate-copilot-customizations', {
+      ROOT: testDir,
+      GITHUB_DIR: path.join(testDir, '.github'),
+      COPILOT_INSTRUCTIONS: path.join(testDir, '.github', 'copilot-instructions.md'),
+      INSTRUCTIONS_DIR: path.join(testDir, '.github', 'instructions'),
+      PROMPTS_DIR: path.join(testDir, '.github', 'prompts'),
+      AGENTS_DIR: path.join(testDir, '.github', 'agents'),
+      COMMON_AGENTS_INSTRUCTIONS: path.join(testDir, '.github', 'instructions', 'common-agents.instructions.md'),
+      COMMON_DEVELOPMENT_WORKFLOW: path.join(testDir, '.github', 'instructions', 'common-development-workflow.instructions.md'),
+      KNOWLEDGE_AUDIT_PROMPT: path.join(testDir, '.github', 'prompts', 'knowledge-audit.prompt.md'),
+      VERIFY_PROMPT: path.join(testDir, '.github', 'prompts', 'verify.prompt.md'),
+      CODER_AGENT: path.join(testDir, '.github', 'agents', 'coder.agent.md'),
+      SAFETY_CHECKER_AGENT: path.join(testDir, '.github', 'agents', 'safety-checker.agent.md'),
+    });
+
+    assert.strictEqual(result.code, 1, result.stderr);
+    assert.ok(result.stderr.includes('common-agents.instructions.md'), 'validator must report the deleted source-of-truth instruction');
+    assert.ok(result.stderr.includes('knowledge-audit.prompt.md'), 'validator must report the deleted knowledge-audit prompt');
+    assert.ok(result.stderr.includes('safety-checker.agent.md'), 'validator must report the deleted safety-checker agent');
+  } finally {
+    cleanupTestDir(testDir);
+  }
+}));
+
+results.push(test('validate-copilot-customizations fails closed when review-routing signals and the root lane are both removed in a repo-level fixture', () => {
+  const testDir = createTestDir();
+  try {
+    writeReviewRoutingFixture(testDir, {
+      '.github/copilot-instructions.md': (source) => source.replace(
+        '**planner → (handoff) → coder → (handoff) → researcher (review)**',
+        '**planner → coder**'
+      ).replace(
+        'Keep researcher as the default implementation review path.',
+        'Use code-reviewer after implementation changes.'
+      ),
+    });
+    fs.writeFileSync(path.join(testDir, 'package.json'), '{"name":"fixture"}\n');
+    fs.rmSync(path.join(testDir, '.github', 'instructions', 'common-agents.instructions.md'));
+    fs.rmSync(path.join(testDir, '.github', 'instructions', 'common-development-workflow.instructions.md'));
+    fs.rmSync(path.join(testDir, '.github', 'prompts', 'knowledge-audit.prompt.md'));
+    fs.rmSync(path.join(testDir, '.github', 'prompts', 'verify.prompt.md'));
+    fs.rmSync(path.join(testDir, '.github', 'agents', 'safety-checker.agent.md'));
+
+    const result = runValidatorWithOverrides('validate-copilot-customizations', {
+      ROOT: testDir,
+      GITHUB_DIR: path.join(testDir, '.github'),
+      COPILOT_INSTRUCTIONS: path.join(testDir, '.github', 'copilot-instructions.md'),
+      INSTRUCTIONS_DIR: path.join(testDir, '.github', 'instructions'),
+      PROMPTS_DIR: path.join(testDir, '.github', 'prompts'),
+      AGENTS_DIR: path.join(testDir, '.github', 'agents'),
+      COMMON_AGENTS_INSTRUCTIONS: path.join(testDir, '.github', 'instructions', 'common-agents.instructions.md'),
+      COMMON_DEVELOPMENT_WORKFLOW: path.join(testDir, '.github', 'instructions', 'common-development-workflow.instructions.md'),
+      KNOWLEDGE_AUDIT_PROMPT: path.join(testDir, '.github', 'prompts', 'knowledge-audit.prompt.md'),
+      VERIFY_PROMPT: path.join(testDir, '.github', 'prompts', 'verify.prompt.md'),
+      CODER_AGENT: path.join(testDir, '.github', 'agents', 'coder.agent.md'),
+      SAFETY_CHECKER_AGENT: path.join(testDir, '.github', 'agents', 'safety-checker.agent.md'),
+    });
+
+    assert.strictEqual(result.code, 1, result.stderr);
+    assert.ok(result.stderr.includes('common-agents.instructions.md'), 'validator must fail when the repo-level fixture loses the review-routing instruction');
+    assert.ok(result.stderr.includes('verify.prompt.md'), 'validator must fail when the repo-level fixture loses verify.prompt.md');
   } finally {
     cleanupTestDir(testDir);
   }
@@ -1128,6 +1336,27 @@ results.push(test('deterministic hooks keep the SessionStart and PreCompact Phas
   );
 }));
 
+results.push(test('deterministic hooks keep session-scoped cleanup for temporary safety and async typecheck state', () => {
+  const hooksConfig = JSON.parse(fs.readFileSync(
+    path.join(__dirname, '..', '..', '.github', 'hooks', 'deterministic-hooks.json'),
+    'utf8'
+  ));
+
+  const stopCommands = (hooksConfig.hooks.Stop || []).flatMap((entry) =>
+    (entry.hooks || []).map((hook) => normalizeHookCommand(hook.command))
+  );
+
+  assert.ok(Array.isArray(hooksConfig.hooks.Stop), 'deterministic hooks must keep the Stop event');
+  assert.ok(
+    stopCommands.some((command) => command.includes('safety-backup.js cleanup')),
+    'deterministic hooks must keep the safety-backup cleanup command on Stop'
+  );
+  assert.ok(
+    stopCommands.some((command) => command.includes('post-edit-typecheck.js cleanup')),
+    'deterministic hooks must keep the async typecheck cleanup command on Stop'
+  );
+}));
+
 results.push(test('deterministic hooks ship the PostToolUseFailure correction wiring', () => {
   const hooksConfig = JSON.parse(fs.readFileSync(
     path.join(__dirname, '..', '..', '.github', 'hooks', 'deterministic-hooks.json'),
@@ -1268,6 +1497,154 @@ results.push(test('verification-loop skill requires checklist enforcement and fo
   assert.ok(verificationSkill.includes('checklist'), 'verification-loop skill must mention checklist enforcement');
   assert.ok(verificationSkill.includes('follow-up') || verificationSkill.includes('次の一手'), 'verification-loop skill must mention follow-up guidance for incomplete work');
   assert.ok(verificationSkill.includes('neutral') || verificationSkill.includes('未使用'), 'verification-loop skill must define the no-todo neutral path');
+}));
+
+results.push(test('review routing policy keeps researcher as default and code-reviewer as high-risk-only across shipped and compatibility docs', () => {
+  const rootAgents = fs.readFileSync(
+    path.join(__dirname, '..', '..', '.github', 'instructions', 'common-agents.instructions.md'),
+    'utf8'
+  );
+  const rootWorkflow = fs.readFileSync(
+    path.join(__dirname, '..', '..', '.github', 'instructions', 'common-development-workflow.instructions.md'),
+    'utf8'
+  );
+  const copilotInstructions = fs.readFileSync(
+    path.join(__dirname, '..', '..', '.github', 'copilot-instructions.md'),
+    'utf8'
+  );
+  const rulesStructure = fs.readFileSync(
+    path.join(__dirname, '..', '..', 'docs', 'ja-JP', 'RULES-STRUCTURE.md'),
+    'utf8'
+  );
+  const jaCodeReviewer = fs.readFileSync(
+    path.join(__dirname, '..', '..', 'docs', 'ja-JP', 'agents', 'code-reviewer.md'),
+    'utf8'
+  );
+  const orchestrateDoc = fs.readFileSync(
+    path.join(__dirname, '..', '..', 'docs', 'ja-JP', 'commands', 'orchestrate.md'),
+    'utf8'
+  );
+  const jaAgents = fs.readFileSync(
+    path.join(__dirname, '..', '..', 'docs', 'ja-JP', 'rules', 'agents.md'),
+    'utf8'
+  );
+  const jaGitWorkflow = fs.readFileSync(
+    path.join(__dirname, '..', '..', 'docs', 'ja-JP', 'rules', 'git-workflow.md'),
+    'utf8'
+  );
+  const compatibilityInstructions = fs.readFileSync(
+    path.join(__dirname, '..', '..', '.opencode', 'instructions', 'INSTRUCTIONS.md'),
+    'utf8'
+  );
+  const compatibilityOrchestrate = fs.readFileSync(
+    path.join(__dirname, '..', '..', '.opencode', 'commands', 'orchestrate.md'),
+    'utf8'
+  );
+  const compatibilityCodeReview = fs.readFileSync(
+    path.join(__dirname, '..', '..', '.opencode', 'commands', 'code-review.md'),
+    'utf8'
+  );
+  const compatibilityReadme = fs.readFileSync(
+    path.join(__dirname, '..', '..', '.opencode', 'README.md'),
+    'utf8'
+  );
+  const compatibilityMigration = fs.readFileSync(
+    path.join(__dirname, '..', '..', '.opencode', 'MIGRATION.md'),
+    'utf8'
+  );
+  const compatibilityConfig = fs.readFileSync(
+    path.join(__dirname, '..', '..', '.opencode', 'opencode.json'),
+    'utf8'
+  );
+  const compatibilityPlugin = fs.readFileSync(
+    path.join(__dirname, '..', '..', '.opencode', 'plugins', 'ecc-hooks.ts'),
+    'utf8'
+  );
+  const compatibilityPackage = fs.readFileSync(
+    path.join(__dirname, '..', '..', '.opencode', 'package.json'),
+    'utf8'
+  );
+  const scriptsAgents = fs.readFileSync(
+    path.join(__dirname, '..', '..', 'scripts', '.github', 'instructions', 'common-agents.instructions.md'),
+    'utf8'
+  );
+  const scriptsWorkflow = fs.readFileSync(
+    path.join(__dirname, '..', '..', 'scripts', '.github', 'instructions', 'common-development-workflow.instructions.md'),
+    'utf8'
+  );
+  const scriptsHooks = fs.readFileSync(
+    path.join(__dirname, '..', '..', 'scripts', '.github', 'hooks', 'deterministic-hooks.json'),
+    'utf8'
+  );
+  const scriptsVerifyPrompt = fs.readFileSync(
+    path.join(__dirname, '..', '..', 'scripts', '.github', 'prompts', 'verify.prompt.md'),
+    'utf8'
+  );
+  const scriptsVerificationLoop = fs.readFileSync(
+    path.join(__dirname, '..', '..', 'scripts', '.github', 'skills', 'verification-loop', 'SKILL.md'),
+    'utf8'
+  );
+  const rootSearchFirst = fs.readFileSync(
+    path.join(__dirname, '..', '..', '.github', 'skills', 'search-first', 'SKILL.md'),
+    'utf8'
+  );
+  const scriptsSearchFirst = fs.readFileSync(
+    path.join(__dirname, '..', '..', 'scripts', '.github', 'skills', 'search-first', 'SKILL.md'),
+    'utf8'
+  );
+
+  assert.ok(rootAgents.includes('High-risk code just written/modified'), 'root common-agents instructions must keep high-risk-only code-reviewer routing');
+  assert.ok(rootWorkflow.includes('Repo-internal dependency tracing first') && rootWorkflow.includes('default implementation review') && rootWorkflow.includes('high-risk changes'), 'root workflow instructions must keep internal static exploration first and code-reviewer as high-risk-only');
+  assert.ok(copilotInstructions.includes('Keep researcher as the default implementation review path'), 'root copilot instructions must keep researcher as the default review path');
+  assert.ok(rootAgents.includes('Immediately after high-risk edits'), 'root common-agents instructions must keep the high-risk safety-checker wording aligned');
+  assert.ok(rulesStructure.includes('高リスクまたは横断変更時'), 'Japanese rules structure doc must keep high-risk code-reviewer wording');
+  assert.ok(jaCodeReviewer.includes('高リスクまたは横断的'), 'Japanese code-reviewer doc must keep the high-risk review scope');
+  assert.ok(orchestrateDoc.includes('planner -> coder -> researcher') && orchestrateDoc.includes('高リスク変更では**code-reviewerを含める**'), 'Japanese orchestrate doc must keep the default lane and high-risk code-reviewer guidance');
+  assert.ok(jaAgents.includes('planner -> coder -> researcher') && jaAgents.includes('高リスク変更'), 'Japanese agent rules must mention the default lane and high-risk review gating');
+  assert.ok(jaGitWorkflow.includes('planner -> coder -> researcher') && jaGitWorkflow.includes('高リスク変更'), 'Japanese git workflow rules must keep the default lane and high-risk review gating');
+  assert.ok(compatibilityInstructions.includes('.github/` is the active GitHub Copilot source of truth') && compatibilityInstructions.includes('High-risk code just written/modified'), 'OpenCode compatibility instructions must keep the source-of-truth note and high-risk review gating');
+  assert.ok(compatibilityInstructions.includes('doc-updater') && compatibilityInstructions.includes('go-build-resolver') && compatibilityInstructions.includes('database-reviewer'), 'OpenCode compatibility instructions must describe the shipped legacy specialist agents accurately');
+  assert.ok(compatibilityInstructions.includes('not running in the `strict` profile') && compatibilityInstructions.includes('`standard` keeps warning-oriented hooks'), 'OpenCode compatibility instructions must describe strict-vs-standard hook behavior accurately');
+  assert.ok(compatibilityOrchestrate.includes('planner → tdd-guide → build-error-resolver') && compatibilityOrchestrate.includes('High-Risk Sequential Execution'), 'OpenCode orchestrate guide must keep a legacy-compatible default lane and a separate high-risk review path');
+  assert.ok(!compatibilityOrchestrate.includes('researcher'), 'OpenCode orchestrate guide must avoid agents that are not shipped in the legacy catalog');
+  assert.ok(compatibilityCodeReview.includes('Review high-risk or cross-cutting changes'), 'OpenCode code-review command must keep the high-risk review wording');
+  assert.ok(compatibilityReadme.includes('High-risk or cross-cutting review') && compatibilityReadme.includes('doc-updater') && compatibilityReadme.includes('Commands (26 configured)'), 'OpenCode README must keep the high-risk code-reviewer wording and match the shipped legacy inventory');
+  assert.ok(compatibilityReadme.includes('AGENTS.md') && compatibilityReadme.includes('skills/*') && compatibilityReadme.includes('POSIX-style shell utilities') && !compatibilityReadme.includes('Check for secrets'), 'OpenCode README must document the package asset boundary, OS caveat, and actual pre-tool hook behavior');
+  assert.ok(compatibilityMigration.includes('High-risk or cross-cutting review') && compatibilityMigration.includes('doc-updater') && compatibilityMigration.includes('26 configured commands') && compatibilityMigration.includes('AGENTS.md') && compatibilityMigration.includes('skills/*') && compatibilityMigration.includes('POSIX-style shell commands') && !compatibilityMigration.includes('Check for secrets before commit'), 'OpenCode migration doc must keep the high-risk code-reviewer wording, package boundary guidance, OS caveat, and shipped hook semantics');
+  assert.ok(compatibilityConfig.includes('Reviews high-risk or cross-cutting changes') && compatibilityConfig.includes('Review high-risk or cross-cutting changes'), 'OpenCode config must keep high-risk-only code-review routing for both the agent and command descriptions');
+  assert.ok(compatibilityPlugin.includes('hookEnabled("post:edit:format", ["strict"])') && compatibilityPlugin.includes('hookEnabled("post:edit:typecheck", ["strict"])') && !compatibilityPlugin.includes('secret'), 'OpenCode plugin implementation must show strict-only format/typecheck and no built-in secret scan');
+  assert.ok(compatibilityPackage.includes('"commands"') && !compatibilityPackage.includes('AGENTS.md') && !compatibilityPackage.includes('CONTRIBUTING.md') && !compatibilityPackage.includes('skills'), 'OpenCode package manifest must continue to omit repo-level docs and skill assets from the published files list');
+  assert.ok(scriptsAgents.includes('High-risk code just written/modified') && scriptsAgents.includes('coder') && scriptsAgents.includes('researcher'), 'scripts/.github common-agents copy must stay aligned with the root routing structure');
+  assert.ok(scriptsWorkflow.includes('Repo-internal dependency tracing first') && scriptsWorkflow.includes('default implementation review') && scriptsWorkflow.includes('high-risk changes'), 'scripts/.github workflow copy must stay aligned with the root review routing and static exploration priority');
+  assert.ok(scriptsHooks.includes('Edit|Write|MultiEdit') && scriptsHooks.includes('post-edit-typecheck.js cleanup') && scriptsHooks.includes('safety-backup.js cleanup'), 'scripts/.github hook mirror must keep the expanded matchers and both session cleanup commands');
+  assert.ok(scriptsVerifyPrompt.includes('verification-only mode') && scriptsVerifyPrompt.includes('final verification or high-risk change sets'), 'scripts/.github verify prompt mirror must stay aligned with the verification-only contract');
+  assert.ok(scriptsVerificationLoop.includes('checklist') && scriptsVerificationLoop.includes('最終確認') && scriptsVerificationLoop.includes('high-risk'), 'scripts/.github verification-loop mirror must stay aligned with the current staged verification guidance');
+  assert.ok(rootSearchFirst.includes('workflow for external reuse') && rootSearchFirst.includes('static exploration such as usage search') && rootSearchFirst.includes('actual references, call paths, or rename impact'), 'root search-first skill must keep external reuse positioning and internal static exploration guidance');
+  assert.ok(scriptsSearchFirst.includes('workflow for external reuse') && scriptsSearchFirst.includes('static exploration such as usage search') && scriptsSearchFirst.includes('actual references, call paths, or rename impact'), 'scripts/.github search-first mirror must stay aligned with the root discovery guidance');
+}));
+
+results.push(test('knowledge-audit, safety-checker, and verify contracts keep the new latency-sensitive boundaries explicit', () => {
+  const knowledgeAuditPrompt = fs.readFileSync(
+    path.join(__dirname, '..', '..', '.github', 'prompts', 'knowledge-audit.prompt.md'),
+    'utf8'
+  );
+  const safetyCheckerAgent = fs.readFileSync(
+    path.join(__dirname, '..', '..', '.github', 'agents', 'safety-checker.agent.md'),
+    'utf8'
+  );
+  const coderAgent = fs.readFileSync(
+    path.join(__dirname, '..', '..', '.github', 'agents', 'coder.agent.md'),
+    'utf8'
+  );
+  const verifyPrompt = fs.readFileSync(
+    path.join(__dirname, '..', '..', '.github', 'prompts', 'verify.prompt.md'),
+    'utf8'
+  );
+
+  assert.ok(knowledgeAuditPrompt.includes('default `researcher`') && knowledgeAuditPrompt.includes('high-risk `code-reviewer`') && knowledgeAuditPrompt.includes('/verify'), 'knowledge-audit prompt must stay separate from researcher review, code-reviewer review, and /verify');
+  assert.ok(safetyCheckerAgent.includes('immediately after high-risk coder edits') && safetyCheckerAgent.includes('settings changes'), 'safety-checker agent must keep the high-risk timing and settings-change scope explicit');
+  assert.ok(coderAgent.includes('High-risk edit直後に安全性チェックを省略しない') && coderAgent.includes('広い回帰確認は最終確認または high-risk closeout'), 'coder agent must keep the high-risk safety-check and deferred broad regression rules');
+  assert.ok(verifyPrompt.includes('final verification or high-risk change sets'), 'verify prompt must keep broad regression checks scoped to final verification or high-risk change sets');
 }));
 
 const passed = results.filter(Boolean).length;

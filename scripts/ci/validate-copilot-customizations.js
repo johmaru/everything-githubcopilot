@@ -14,6 +14,12 @@ const COPILOT_INSTRUCTIONS = path.join(GITHUB_DIR, 'copilot-instructions.md');
 const INSTRUCTIONS_DIR = path.join(GITHUB_DIR, 'instructions');
 const PROMPTS_DIR = path.join(GITHUB_DIR, 'prompts');
 const AGENTS_DIR = path.join(GITHUB_DIR, 'agents');
+const COMMON_AGENTS_INSTRUCTIONS = path.join(INSTRUCTIONS_DIR, 'common-agents.instructions.md');
+const COMMON_DEVELOPMENT_WORKFLOW = path.join(INSTRUCTIONS_DIR, 'common-development-workflow.instructions.md');
+const KNOWLEDGE_AUDIT_PROMPT = path.join(PROMPTS_DIR, 'knowledge-audit.prompt.md');
+const VERIFY_PROMPT = path.join(PROMPTS_DIR, 'verify.prompt.md');
+const CODER_AGENT = path.join(AGENTS_DIR, 'coder.agent.md');
+const SAFETY_CHECKER_AGENT = path.join(AGENTS_DIR, 'safety-checker.agent.md');
 
 const BUILT_IN_PROMPT_AGENTS = new Set(['ask', 'agent', 'plan']);
 
@@ -116,7 +122,33 @@ function frontmatterHasListValue(content, key, expectedValue) {
 }
 
 function normalizeForAnchorCheck(content) {
-  return content.replace(/^---\r?\n[\s\S]*?\r?\n---/, '').replace(/\s+/g, '');
+  return content
+    .replace(/^---\r?\n[\s\S]*?\r?\n---/, '')
+    .replace(/[`*]/g, '')
+    .replace(/\s+/g, '')
+    .toLowerCase();
+}
+
+function collectMissingAnchors(content, anchorGroups) {
+  const normalizedContent = normalizeForAnchorCheck(content);
+  return anchorGroups
+    .filter((group) => !group.some((anchor) => normalizedContent.includes(anchor.toLowerCase())))
+    .map((group) => group[0]);
+}
+
+function validateAnchoredContract(filePath, errors, ruleId, requirement, anchorGroups) {
+  if (!fs.existsSync(filePath)) {
+    return;
+  }
+
+  const missingAnchors = collectMissingAnchors(readUtf8(filePath), anchorGroups);
+  if (missingAnchors.length === 0) {
+    return;
+  }
+
+  errors.push(
+    `ERROR: ${ruleId}: ${relative(filePath)} ${requirement} (missing anchors: ${missingAnchors.join(', ')})`
+  );
 }
 
 function extractMarkdownSection(content, heading) {
@@ -372,6 +404,139 @@ function validatePlannerResearcherContract(filePath, content, errors) {
   }
 }
 
+function validateReviewRoutingContracts(errors) {
+  const requiredContractFiles = [
+    [COMMON_AGENTS_INSTRUCTIONS, 'P1-009', 'must keep common-agents.instructions.md present for review-routing enforcement'],
+    [COMMON_DEVELOPMENT_WORKFLOW, 'P1-009', 'must keep common-development-workflow.instructions.md present for review-routing enforcement'],
+    [COPILOT_INSTRUCTIONS, 'P1-009', 'must keep copilot-instructions.md present for review-routing enforcement'],
+    [KNOWLEDGE_AUDIT_PROMPT, 'P1-010', 'must keep knowledge-audit.prompt.md present for knowledge-audit boundary enforcement'],
+    [VERIFY_PROMPT, 'P1-010', 'must keep verify.prompt.md present for verification boundary enforcement'],
+    [CODER_AGENT, 'P1-010', 'must keep coder.agent.md present for latency-sensitive review boundary enforcement'],
+    [SAFETY_CHECKER_AGENT, 'P1-010', 'must keep safety-checker.agent.md present for high-risk safety boundary enforcement'],
+  ];
+
+  const contractSurfaceSignals = [
+    COMMON_AGENTS_INSTRUCTIONS,
+    COMMON_DEVELOPMENT_WORKFLOW,
+    KNOWLEDGE_AUDIT_PROMPT,
+    VERIFY_PROMPT,
+    SAFETY_CHECKER_AGENT,
+  ];
+
+  const copilotInstructionsContent = fs.existsSync(COPILOT_INSTRUCTIONS) ? readUtf8(COPILOT_INSTRUCTIONS) : '';
+  const normalizedCopilotInstructions = normalizeForAnchorCheck(copilotInstructionsContent);
+  const hasRootReviewRoutingAnchor = normalizedCopilotInstructions.includes('planner→(handoff)→coder→(handoff)→researcher(review)')
+    || normalizedCopilotInstructions.includes('planner->coder->researcher')
+    || normalizedCopilotInstructions.includes('planner->coder->researcherlane')
+    || normalizedCopilotInstructions.includes('keepresearcherasthedefaultimplementationreviewpath');
+  const hasRepoLevelSignal = fs.existsSync(path.join(ROOT, 'package.json')) || fs.existsSync(path.join(ROOT, 'AGENTS.md'));
+
+  if (!contractSurfaceSignals.some((filePath) => fs.existsSync(filePath)) && !hasRootReviewRoutingAnchor && !hasRepoLevelSignal) {
+    return;
+  }
+
+  let missingFileFound = false;
+  for (const [filePath, ruleId, requirement] of requiredContractFiles) {
+    if (fs.existsSync(filePath)) {
+      continue;
+    }
+
+    missingFileFound = true;
+    errors.push(`ERROR: ${ruleId}: ${relative(filePath)} ${requirement}`);
+  }
+
+  if (missingFileFound) {
+    return;
+  }
+
+  validateAnchoredContract(
+    COMMON_AGENTS_INSTRUCTIONS,
+    errors,
+    'P1-009',
+    'must keep the high-risk-only code-reviewer routing anchor in the source-of-truth instructions',
+    [
+      ['high-riskcodejustwritten/modified'],
+      ['code-reviewer'],
+      ['high-riskchangesinclude'],
+    ]
+  );
+
+  validateAnchoredContract(
+    COMMON_DEVELOPMENT_WORKFLOW,
+    errors,
+    'P1-009',
+    'must keep researcher as the default implementation review and code-reviewer as high-risk-only',
+    [
+      ['defaultimplementationreview'],
+      ['planner->coder->researcher', 'planner->coder->researcherlane', 'defaultimplementationreviewintheplanner->coder->researcherlane'],
+      ['high-riskchanges'],
+    ]
+  );
+
+  validateAnchoredContract(
+    COPILOT_INSTRUCTIONS,
+    errors,
+    'P1-009',
+    'must keep the root review-routing contract aligned with the shipped implementation lane',
+    [
+      ['planner→(handoff)→coder→(handoff)→researcher(review)'],
+      ['usecode-revieweronlyforhigh-riskorcross-cuttingrepositorychanges'],
+      ['keepresearcherasthedefaultimplementationreviewpath'],
+    ]
+  );
+
+  validateAnchoredContract(
+    KNOWLEDGE_AUDIT_PROMPT,
+    errors,
+    'P1-010',
+    'must keep repository knowledge maintenance separate from implementation review and verification flows',
+    [
+      ['repositoryknowledgemaintenanceonly'],
+      ['defaultresearcher'],
+      ['high-riskcode-reviewer'],
+      ['/verify'],
+    ]
+  );
+
+  validateAnchoredContract(
+    VERIFY_PROMPT,
+    errors,
+    'P1-010',
+    'must keep broad regression scoped to final verification or high-risk change sets',
+    [
+      ['verification-onlymode'],
+      ['finalverificationorhigh-riskchangesets'],
+      ['checklist'],
+    ]
+  );
+
+  validateAnchoredContract(
+    SAFETY_CHECKER_AGENT,
+    errors,
+    'P1-010',
+    'must keep the high-risk-only safety review timing and scope explicit',
+    [
+      ['immediatelyafterhigh-riskcoderedits', 'immediatelyafterhigh-riskedits', 'reviewrunsimmediatelyafterhigh-riskcoderedits'],
+      ['settingschanges'],
+      ['multi-filechanges'],
+    ]
+  );
+
+  validateAnchoredContract(
+    CODER_AGENT,
+    errors,
+    'P1-010',
+    'must keep the latency-sensitive coder review and verification boundaries explicit',
+    [
+      ['high-riskedit直後に安全性チェックを省略しない'],
+      ['広い回帰確認は最終確認またはhigh-riskcloseout'],
+      ['既定review'],
+      ['high-risk追加review'],
+      ['planner->coder->researcher'],
+    ]
+  );
+}
+
 function validateAgents(files, errors, warnings) {
   const names = new Map();
   const handoffRefs = new Map();
@@ -460,6 +625,7 @@ function main() {
   validateInstructions(instructionFiles, errors);
   const customAgentNames = validateAgents(agentFiles, errors, warnings);
   validatePrompts(promptFiles, customAgentNames, errors);
+  validateReviewRoutingContracts(errors);
 
   if (errors.length > 0) {
     for (const error of errors) {

@@ -271,6 +271,43 @@ results.push(test('applies Kimi specific aliases when a matching model profile i
   assert.ok(kimiPlan.appliedFixes.some((fix) => fix.type === 'rename_alias' && fix.from === 'task' && fix.to === 'description'));
 }));
 
+results.push(test('corrects vscode_listCodeUsages aliases instead of treating AST usage search as an unknown schema', () => {
+  const plan = correction.buildCorrectionPlan({
+    toolName: 'vscode_listCodeUsages',
+    toolInput: {
+      symbol_name: 'buildCorrectionPlan',
+      file_path: 'tests/hooks/tool-call-correction.test.js',
+      line_content: 'const plan = correction.buildCorrectionPlan({',
+    },
+  });
+
+  assert.strictEqual(plan.status, 'suggested');
+  assert.strictEqual(plan.failureType, 'validation_alias_match');
+  assert.deepStrictEqual(plan.correctedInput, {
+    symbol: 'buildCorrectionPlan',
+    filePath: 'tests/hooks/tool-call-correction.test.js',
+    lineContent: 'const plan = correction.buildCorrectionPlan({',
+  });
+  assert.ok(plan.appliedFixes.some((fix) => fix.type === 'rename_alias' && fix.from === 'symbol_name' && fix.to === 'symbol'));
+  assert.ok(plan.appliedFixes.some((fix) => fix.type === 'rename_alias' && fix.from === 'file_path' && fix.to === 'filePath'));
+  assert.ok(plan.appliedFixes.some((fix) => fix.type === 'rename_alias' && fix.from === 'line_content' && fix.to === 'lineContent'));
+}));
+
+results.push(test('blocks vscode_listCodeUsages when neither filePath nor uri is present', () => {
+  const plan = correction.buildCorrectionPlan({
+    toolName: 'vscode_listCodeUsages',
+    toolInput: {
+      symbol_name: 'buildCorrectionPlan',
+      line_content: 'const plan = correction.buildCorrectionPlan({',
+    },
+  });
+
+  assert.strictEqual(plan.status, 'blocked');
+  assert.strictEqual(plan.failureType, 'validation_missing_required');
+  assert.strictEqual(plan.blockedReason, 'missing_required_value');
+  assert.deepStrictEqual(plan.missingRequired, ['filePath|uri']);
+}));
+
 results.push(test('evaluates correction cases and reports hit rate', () => {
   const report = correction.evaluateCorrectionCases([
     {
@@ -307,10 +344,42 @@ results.push(test('evaluates correction cases and reports hit rate', () => {
         },
       },
     },
+    {
+      name: 'ast usages alias case',
+      toolName: 'vscode_listCodeUsages',
+      toolInput: {
+        symbol_name: 'buildCorrectionPlan',
+        file_path: 'tests/hooks/tool-call-correction.test.js',
+        line_content: 'const plan = correction.buildCorrectionPlan({',
+      },
+      expected: {
+        status: 'suggested',
+        failureType: 'validation_alias_match',
+        correctedInput: {
+          symbol: 'buildCorrectionPlan',
+          filePath: 'tests/hooks/tool-call-correction.test.js',
+          lineContent: 'const plan = correction.buildCorrectionPlan({',
+        },
+      },
+    },
+    {
+      name: 'ast usages missing location case',
+      toolName: 'vscode_listCodeUsages',
+      toolInput: {
+        symbol_name: 'buildCorrectionPlan',
+        line_content: 'const plan = correction.buildCorrectionPlan({',
+      },
+      expected: {
+        status: 'blocked',
+        failureType: 'validation_missing_required',
+        blockedReason: 'missing_required_value',
+        missingRequired: ['filePath|uri'],
+      },
+    },
   ]);
 
-  assert.strictEqual(report.total, 2);
-  assert.strictEqual(report.hits, 2);
+  assert.strictEqual(report.total, 4);
+  assert.strictEqual(report.hits, 4);
   assert.strictEqual(report.missCount, 0);
   assert.strictEqual(report.hitRate, 1);
   assert.ok(report.cases.every((testCase) => testCase.hit));

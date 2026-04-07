@@ -1,10 +1,12 @@
 ---
 name: search-first
-description: Research-before-coding workflow. Search for existing tools, libraries, and patterns before writing custom code. Invokes the researcher agent.
+description: Research-before-coding workflow for external reuse. Search for existing tools, libraries, and patterns before writing custom code, but use repo-internal static exploration first for dependency tracing, usages, and rename impact. Invokes the researcher agent.
 ---
 # /search-first — Research Before You Code
 
 Systematizes the "search for existing solutions before implementing" workflow.
+
+This skill is for reuse research. It does not replace repo-internal static exploration such as usage search or local entry-point discovery when the question is "where is this used?" or "what owns this behavior in this repository?".
 
 ## Trigger
 
@@ -60,10 +62,11 @@ Use this skill when:
 Before writing a utility or adding functionality, mentally run through:
 
 0. Does this already exist in the repo? → `rg` through relevant modules/tests first
-1. Is this a common problem? → Search npm/PyPI
-2. Is there an MCP for this? → Check VS Code settings or `.github/copilot-instructions.md` and search
-3. Is there a skill for this? → Check `.github/skills/`
-4. Is there a GitHub implementation/template? → Run GitHub code search for maintained OSS before writing net-new code
+1. Do I need actual references, call paths, or rename impact inside this repo? → Use static usage search first, then read the owning files
+2. Is this a common problem? → Search npm/PyPI
+3. Is there an MCP for this? → Check VS Code settings or `.github/copilot-instructions.md` and search
+4. Is there a skill for this? → Check `.github/skills/`
+5. Is there a GitHub implementation/template? → Run GitHub code search for maintained OSS before writing net-new code
 
 ### Full Mode (agent)
 
@@ -153,6 +156,7 @@ Result: 1 package + 1 schema file, no custom validation logic
 
 ## Anti-Patterns
 
+- **Using external search for internal dependency questions**: GitHub code search or npm lookup will not tell you the real call graph of this repository
 - **Jumping to code**: Writing a utility without checking if one exists
 - **Ignoring MCP**: Not checking if an MCP server already provides the capability
 - **Over-customizing**: Wrapping a library so heavily it loses its benefits

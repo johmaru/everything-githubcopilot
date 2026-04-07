@@ -59,7 +59,7 @@
       }
     },
     "code-reviewer": {
-      "description": "Expert code review specialist. Reviews code for quality, security, and maintainability. Use immediately after writing or modifying code.",
+      "description": "Expert code review specialist. Reviews high-risk or cross-cutting changes for quality, security, and maintainability. Use when workspace instructions, agents, prompts, skills, hooks, installer scripts, package metadata, validators, schemas, or other sensitive automation changes.",
       "mode": "subagent",
       "model": "anthropic/claude-opus-4-5",
       "prompt": "{file:prompts/agents/code-reviewer.txt}",
@@ -193,7 +193,7 @@
       "subtask": true
     },
     "code-review": {
-      "description": "Review code for quality, security, and maintainability",
+      "description": "Review high-risk or cross-cutting changes for quality, security, and maintainability",
       "template": "{file:commands/code-review.md}\n\n$ARGUMENTS",
       "agent": "code-reviewer",
       "subtask": true

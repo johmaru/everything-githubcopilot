@@ -15,6 +15,7 @@
 ## Pull Request ワークフロー
 
 PR を作成する際:
+
 1. 完全なコミット履歴を分析（最新のコミットだけでなく）
 2. `git diff [base-branch]...HEAD` を使用してすべての変更を確認
 3. 包括的な PR サマリーを作成
@@ -36,7 +37,8 @@ PR を作成する際:
    - 80%+ カバレッジを確認
 
 3. **コードレビュー**
-   - コード記述直後に **code-reviewer** agent を使用
+   - 通常の実装レビューは planner -> coder -> researcher レーンを使用
+   - **code-reviewer** agent は workspace instructions、agents、file instructions、prompts、skills、hooks、installer scripts、package metadata、validators、schemas、security-sensitive automation などの高リスク変更で使用
    - CRITICAL と HIGH の問題に対処
    - 可能な限り MEDIUM の問題を修正
 

@@ -69,7 +69,7 @@ async function main() {
       'tool-call-correction',
       'verification-enforcement',
     ]);
-    assert.ok(report.summary.total >= 19);
+    assert.strictEqual(report.summary.total, 21);
     assert.strictEqual(report.summary.missCount, 0);
     assert.strictEqual(report.summary.hitRate, 1);
     assert.ok(report.reports.entryPointRetrieval);
@@ -86,16 +86,16 @@ async function main() {
       fs.writeFileSync(baselinePath, JSON.stringify({
         generatedAt: '2026-04-05T00:00:00Z',
         summary: {
-          total: 19,
-          hits: 18,
+          total: 21,
+          hits: 20,
           missCount: 1,
-          hitRate: 18 / 19,
+          hitRate: 20 / 21,
           usedEmbeddings: false,
         },
         areas: [
           { area: 'entry-point-retrieval', total: 4, hits: 3, missCount: 1, hitRate: 0.75, usedEmbeddings: false },
           { area: 'skill-routing', total: 6, hits: 6, missCount: 0, hitRate: 1, usedEmbeddings: false },
-          { area: 'tool-call-correction', total: 5, hits: 5, missCount: 0, hitRate: 1, usedEmbeddings: false },
+          { area: 'tool-call-correction', total: 7, hits: 7, missCount: 0, hitRate: 1, usedEmbeddings: false },
           { area: 'verification-enforcement', total: 4, hits: 4, missCount: 0, hitRate: 1, usedEmbeddings: false }
         ]
       }, null, 2));

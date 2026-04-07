@@ -1,4 +1,5 @@
 const assert = require('assert');
+const crypto = require('crypto');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
@@ -22,6 +23,11 @@ function createTestDir() {
 
 function cleanupTestDir(testDir) {
   fs.rmSync(testDir, { recursive: true, force: true });
+}
+
+function getTypecheckStateFilePath(cwd, sessionId = 'test-session') {
+  const key = crypto.createHash('sha1').update(`${cwd}::${sessionId}`).digest('hex');
+  return path.join(os.tmpdir(), 'egc-post-edit-typecheck', `${key}.token`);
 }
 
 function runHookScript(scriptName, { cwd, sharedStub }) {
@@ -172,10 +178,46 @@ results.push(test('post-edit-format formats every eligible file from a multi-edi
   }
 }));
 
+results.push(test('post-edit-format skips markdown-only edits so doc updates do not pay the formatter cost on every edit', () => {
+  const testDir = createTestDir();
+  const emitted = [];
+  const runCalls = [];
+
+  try {
+    const markdownFile = path.join(testDir, 'docs', 'guide.md');
+    fs.mkdirSync(path.dirname(markdownFile), { recursive: true });
+    fs.writeFileSync(markdownFile, '# Guide\n');
+
+    runHookScript('post-edit-format.js', {
+      cwd: testDir,
+      sharedStub: createSharedStub({
+        payload: {
+          tool_input: {
+            edits: [
+              { filePath: markdownFile },
+            ],
+          },
+        },
+        emitted,
+        runLocalBinImpl(name, args) {
+          runCalls.push({ name, args });
+          return { status: 0, stdout: '', stderr: '' };
+        },
+      }),
+    });
+
+    assert.strictEqual(runCalls.length, 0, 'prettier should be skipped for markdown-only edits');
+    assert.strictEqual(emitted.length, 0, 'no formatter warning should be emitted when formatting is skipped');
+  } finally {
+    cleanupTestDir(testDir);
+  }
+}));
+
 results.push(test('post-edit-typecheck triggers one targeted TypeScript check when any edited file is TypeScript', () => {
   const testDir = createTestDir();
   const emitted = [];
   const runCalls = [];
+  const sessionId = 'typecheck-run';
 
   try {
     const firstFile = path.join(testDir, 'src', 'first.js');
@@ -188,6 +230,7 @@ results.push(test('post-edit-typecheck triggers one targeted TypeScript check wh
       cwd: testDir,
       sharedStub: createSharedStub({
         payload: {
+          sessionId,
           tool_input: {
             edits: [
               { filePath: firstFile },
@@ -210,6 +253,173 @@ results.push(test('post-edit-typecheck triggers one targeted TypeScript check wh
     });
   } finally {
     cleanupTestDir(testDir);
+  }
+}));
+
+results.push(test('post-edit-typecheck suppresses stale warnings when a newer async run supersedes the current result', () => {
+  const testDir = createTestDir();
+  const emitted = [];
+  const sessionId = 'stale-session';
+  const stateFilePath = getTypecheckStateFilePath(testDir, sessionId);
+
+  try {
+    const filePath = path.join(testDir, 'src', 'second.ts');
+    fs.mkdirSync(path.dirname(filePath), { recursive: true });
+    fs.writeFileSync(filePath, 'export const second = 2;\n');
+
+    runHookScript('post-edit-typecheck.js', {
+      cwd: testDir,
+      sharedStub: createSharedStub({
+        payload: {
+          sessionId,
+          tool_input: {
+            edits: [
+              { filePath },
+            ],
+          },
+        },
+        emitted,
+        runLocalBinImpl() {
+          fs.mkdirSync(path.dirname(stateFilePath), { recursive: true });
+          fs.writeFileSync(stateFilePath, 'newer-run-token', 'utf8');
+          return { status: 1, stdout: 'src/second.ts(1,1): error TS1005: test', stderr: '' };
+        },
+      }),
+    });
+
+    assert.strictEqual(emitted.length, 0, 'stale typecheck warnings should be suppressed');
+  } finally {
+    cleanupTestDir(testDir);
+  }
+}));
+
+results.push(test('post-edit-typecheck treats tsconfig edits as typecheck-relevant so stale async warnings can be invalidated', () => {
+  const testDir = createTestDir();
+  const emitted = [];
+  const sessionId = 'tsconfig-session';
+  const stateFilePath = getTypecheckStateFilePath(testDir, sessionId);
+
+  try {
+    const filePath = path.join(testDir, 'tsconfig.json');
+    fs.mkdirSync(path.dirname(filePath), { recursive: true });
+    fs.writeFileSync(filePath, '{"compilerOptions":{"strict":true}}\n');
+    fs.mkdirSync(path.dirname(stateFilePath), { recursive: true });
+    fs.writeFileSync(stateFilePath, 'older-run-token', 'utf8');
+
+    runHookScript('post-edit-typecheck.js', {
+      cwd: testDir,
+      sharedStub: createSharedStub({
+        payload: {
+          sessionId,
+          tool_input: {
+            edits: [
+              { filePath },
+            ],
+          },
+        },
+        emitted,
+        runLocalBinImpl() {
+          return { status: 0, stdout: '', stderr: '' };
+        },
+      }),
+    });
+
+    assert.notStrictEqual(fs.readFileSync(stateFilePath, 'utf8'), 'older-run-token', 'typecheck-relevant config edits should invalidate older async runs');
+    assert.strictEqual(emitted.length, 0, 'no warning should be emitted when the re-check passes');
+  } finally {
+    cleanupTestDir(testDir);
+    fs.rmSync(stateFilePath, { force: true });
+  }
+}));
+
+results.push(test('post-edit-typecheck ignores unrelated non-TypeScript edits without touching the current session token', () => {
+  const testDir = createTestDir();
+  const emitted = [];
+  const sessionId = 'unrelated-edit-session';
+  const stateFilePath = getTypecheckStateFilePath(testDir, sessionId);
+
+  try {
+    const filePath = path.join(testDir, 'docs', 'guide.md');
+    fs.mkdirSync(path.dirname(filePath), { recursive: true });
+    fs.writeFileSync(filePath, '# Guide\n');
+    fs.mkdirSync(path.dirname(stateFilePath), { recursive: true });
+    fs.writeFileSync(stateFilePath, 'existing-token', 'utf8');
+
+    runHookScript('post-edit-typecheck.js', {
+      cwd: testDir,
+      sharedStub: createSharedStub({
+        payload: {
+          sessionId,
+          tool_input: {
+            edits: [
+              { filePath },
+            ],
+          },
+        },
+        emitted,
+      }),
+    });
+
+    assert.strictEqual(fs.readFileSync(stateFilePath, 'utf8'), 'existing-token', 'unrelated edits should not invalidate the current session token');
+    assert.strictEqual(emitted.length, 0, 'no warning should be emitted for unrelated edits');
+  } finally {
+    cleanupTestDir(testDir);
+    fs.rmSync(stateFilePath, { force: true });
+  }
+}));
+
+results.push(test('post-edit-typecheck cleanup removes the async token file', () => {
+  const testDir = createTestDir();
+  const emitted = [];
+  const sessionId = 'cleanup-session';
+  const stateFilePath = getTypecheckStateFilePath(testDir, sessionId);
+  const otherSessionStateFilePath = getTypecheckStateFilePath(testDir, 'other-session');
+
+  try {
+    fs.mkdirSync(path.dirname(stateFilePath), { recursive: true });
+    fs.writeFileSync(stateFilePath, 'token', 'utf8');
+    fs.writeFileSync(otherSessionStateFilePath, 'other-token', 'utf8');
+
+    runHookScript('post-edit-typecheck.js', {
+      cwd: testDir,
+      sharedStub: createSharedStub({
+        payload: {
+          sessionId,
+          tool_input: {
+            edits: [],
+          },
+        },
+        emitted,
+      }),
+    });
+
+    assert.ok(fs.existsSync(stateFilePath), 'sanity check: token file should still exist before cleanup');
+
+    const originalArgv = process.argv;
+    process.argv = [...process.argv, 'cleanup'];
+    try {
+      runHookScript('post-edit-typecheck.js', {
+        cwd: testDir,
+        sharedStub: createSharedStub({
+          payload: {
+            sessionId,
+            tool_input: {
+              edits: [],
+            },
+          },
+          emitted,
+        }),
+      });
+    } finally {
+      process.argv = originalArgv;
+    }
+
+    assert.strictEqual(fs.existsSync(stateFilePath), false, 'cleanup should remove the async token file');
+    assert.strictEqual(fs.existsSync(otherSessionStateFilePath), true, 'cleanup should leave other session token files intact');
+  } finally {
+    cleanupTestDir(testDir);
+    fs.rmSync(stateFilePath, { force: true });
+    fs.rmSync(otherSessionStateFilePath, { force: true });
   }
 }));
 

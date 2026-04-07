@@ -58,7 +58,7 @@
         ]
       },
       {
-        "matcher": "Edit",
+        "matcher": "Edit|Write|MultiEdit",
         "description": "Auto-format JS and TS files after edits.",
         "hooks": [
           {
@@ -68,17 +68,19 @@
         ]
       },
       {
-        "matcher": "Edit",
-        "description": "Run a targeted TypeScript check after editing TS files.",
+        "matcher": "Edit|Write|MultiEdit",
+        "description": "Queue a targeted TypeScript check after editing TS files.",
         "hooks": [
           {
             "type": "command",
-            "command": "node -e \"var s='./scripts/hooks/post-edit-typecheck.js';require('fs').existsSync(s)&&require(s)\""
+            "command": "node -e \"var s='./scripts/hooks/post-edit-typecheck.js';require('fs').existsSync(s)&&require(s)\"",
+            "async": true,
+            "timeout": 30
           }
         ]
       },
       {
-        "matcher": "Edit",
+        "matcher": "Edit|Write|MultiEdit",
         "description": "Warn when edited JS or TS files still contain console.log statements.",
         "hooks": [
           {
@@ -107,6 +109,26 @@
           {
             "type": "command",
             "command": "node -e \"var s='./scripts/hooks/session-stop.js';require('fs').existsSync(s)&&require(s)\"",
+            "timeout": 10
+          }
+        ]
+      },
+      {
+        "description": "Delete temporary async typecheck state for the current session.",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node ./scripts/hooks/post-edit-typecheck.js cleanup",
+            "timeout": 10
+          }
+        ]
+      },
+      {
+        "description": "Delete temporary safety backups for the current session.",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node ./scripts/hooks/safety-backup.js cleanup",
             "timeout": 10
           }
         ]
