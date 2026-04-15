@@ -32,6 +32,7 @@ function getUserInstallManifest() {
       'scripts/hooks',
       'schemas',
       'tests/fixtures',
+      'rust/semantic-indexer',
       'package.json',
       'node_modules',
       'package-lock.json',
@@ -46,6 +47,7 @@ function getUserInstallManifest() {
       { src: 'scripts/hooks', dst: 'scripts/hooks', pattern: '*.js' },
       { src: 'schemas', dst: 'schemas', pattern: '*.json' },
       { src: 'tests/fixtures', dst: 'tests/fixtures', recursive: true },
+      { src: 'rust/semantic-indexer', dst: 'rust/semantic-indexer', recursive: true, excludeRelativePaths: ['target'] },
     ],
   };
 }
@@ -67,6 +69,7 @@ function getProjectInstallManifest() {
       { src: 'AGENTS.md', dst: 'AGENTS.md', single: true },
       { src: 'tests/fixtures', dst: 'tests/fixtures', recursive: true },
       { src: 'rust/semantic-indexer', dst: 'rust/semantic-indexer', recursive: true, excludeRelativePaths: ['target'] },
+      { src: '.codex', dst: '.codex', recursive: true },
     ],
   };
 }

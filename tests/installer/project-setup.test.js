@@ -160,6 +160,9 @@ results.push(test('project setup copies the shared manifest payload without over
     assert.ok(fs.existsSync(path.join(targetDir, '.github', 'instructions', 'converted', 'common-performance.instructions.md')), 'nested instructions should be copied');
     assert.ok(fs.existsSync(path.join(targetDir, 'rust', 'semantic-indexer', 'Cargo.toml')), 'rust semantic indexer should be copied');
     assert.ok(!fs.existsSync(path.join(targetDir, 'rust', 'semantic-indexer', 'target')), 'rust build artifacts should not be copied');
+    assert.ok(fs.existsSync(path.join(targetDir, '.codex', 'config.toml')), 'codex config should be copied');
+    assert.ok(fs.existsSync(path.join(targetDir, '.codex', 'AGENTS.md')), 'codex AGENTS.md should be copied');
+    assert.ok(fs.existsSync(path.join(targetDir, '.codex', 'agents', 'explorer.toml')), 'codex agent roles should be copied');
     assert.ok(fs.existsSync(path.join(targetDir, 'tests', 'fixtures', 'skill-router', 'eval-cases.json')), 'eval fixtures should be copied');
     assert.ok(fs.existsSync(path.join(targetDir, 'scripts', 'ci', 'validate-github-hooks.js')), 'validator scripts should be copied');
   } finally {

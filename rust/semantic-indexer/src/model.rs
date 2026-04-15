@@ -26,6 +26,12 @@ pub enum SymbolKind {
     Class,
     Struct,
     Enum,
+    Trait,
+    Impl,
+    TypeAlias,
+    Const,
+    Static,
+    Macro,
     Export,
 }
 
@@ -37,6 +43,12 @@ impl SymbolKind {
             Self::Class => "class",
             Self::Struct => "struct",
             Self::Enum => "enum",
+            Self::Trait => "trait",
+            Self::Impl => "impl",
+            Self::TypeAlias => "type_alias",
+            Self::Const => "const",
+            Self::Static => "static",
+            Self::Macro => "macro",
             Self::Export => "export",
         }
     }

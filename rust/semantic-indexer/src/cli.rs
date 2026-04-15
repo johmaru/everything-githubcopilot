@@ -8,11 +8,13 @@ use clap::ValueEnum;
 use crate::discovery::{collect_source_files, ensure_file_within_root};
 use crate::embedding::build_embedding_records;
 use crate::indexer::index_source_files;
+use crate::report::build_summary_report;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
 enum OutputFormat {
     Json,
     Jsonl,
+    Summary,
 }
 
 #[derive(Debug, ClapParser)]
@@ -61,5 +63,8 @@ where
             }
             Ok(lines.join("\n"))
         }
+        OutputFormat::Summary => Ok(serde_json::to_string_pretty(&build_summary_report(
+            &symbols,
+        ))?),
     }
 }

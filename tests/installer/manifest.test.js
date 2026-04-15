@@ -36,6 +36,7 @@ results.push(test('user install manifest includes the expected managed paths', (
     'scripts/hooks',
     'schemas',
     'tests/fixtures',
+    'rust/semantic-indexer',
     'package.json',
     'node_modules',
     'package-lock.json',
@@ -56,6 +57,8 @@ results.push(test('user install manifest maps repo assets into ~/.copilot payloa
   assert.strictEqual(bySource.get('scripts/hooks').dst, 'scripts/hooks');
   assert.strictEqual(bySource.get('schemas').dst, 'schemas');
   assert.strictEqual(bySource.get('tests/fixtures').dst, 'tests/fixtures');
+  assert.strictEqual(bySource.get('rust/semantic-indexer').dst, 'rust/semantic-indexer');
+  assert.strictEqual(bySource.get('rust/semantic-indexer').recursive, true);
 }));
 
 results.push(test('project install manifest includes the current shipped project payload', () => {
@@ -64,6 +67,7 @@ results.push(test('project install manifest includes the current shipped project
   const instructionsOperation = manifest.copyOperations.find(operation => operation.src === '.github/instructions');
 
   assert.deepStrictEqual(sources, [
+    '.codex',
     '.github/agents',
     '.github/copilot-instructions.md',
     '.github/hooks',
@@ -80,6 +84,15 @@ results.push(test('project install manifest includes the current shipped project
     'tests/fixtures',
   ]);
   assert.strictEqual(instructionsOperation.recursive, true);
+}));
+
+results.push(test('user install manifest does not include .codex (Codex reads from project root, not ~/.copilot)', () => {
+  const manifest = getUserInstallManifest();
+  const sources = manifest.copyOperations.map(operation => operation.src);
+  const managedPaths = manifest.managedPaths;
+
+  assert.ok(!sources.some(src => src.startsWith('.codex')), 'user install should not copy .codex');
+  assert.ok(!managedPaths.some(p => p.startsWith('.codex')), 'user install should not manage .codex paths');
 }));
 
 results.push(test('runtime dependencies include all hook and validator dependencies', () => {

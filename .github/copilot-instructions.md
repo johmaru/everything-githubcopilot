@@ -33,6 +33,7 @@ On failure: **coder → (handoff) → planner (re-plan)**
 
 - For repo-internal dependency tracing, symbol impact analysis, rename safety checks, dead export checks, and cross-file responsibility mapping, prefer `#search/usages` before plain text search. Treat it as the primary static reference search surface.
 - Use `#search/codebase` or text search to discover rough candidate files, then use `#search/usages` to confirm actual references and call paths.
+- Use `semantic-indexer` through `npm run entry-points:index`, `npm run entry-points:query`, `npm run rust:index -- --format summary`, or targeted `npm run rust:index -- --file <path>` calls when the task needs file-level symbol inventories, exported-surface counts, kind/doc-coverage reports, symbol density comparisons, or a repo-wide static AST summary that plain usage search cannot provide efficiently.
 - Reserve GitHub code search and broader external research for reuse and library discovery, not for primary dependency tracing inside this repository.
 
 ## Skills (ForgeCode Optimizations)
@@ -56,6 +57,7 @@ These encode the techniques that raised ForgeCode's Terminal-Bench 2.0 score fro
 
 Use `.github` as the source of truth.
 
+- `.codex/` and `.opencode/` are maintained compatibility surfaces. They mirror `.github/` guidance for Codex CLI and OpenCode respectively. Project setup distributes `.codex/` into target projects.
 - Do not add new authoritative guidance outside `.github/` unless it explicitly targets a compatibility surface (e.g. `.codex/`, `.opencode/`).
 - Do not make critical behavior depend on semantic skill loading alone. Important rules must be always-on or `applyTo`-scoped.
 - Keep instructions terse and self-contained. Split long guidance into smaller files instead of growing this file.

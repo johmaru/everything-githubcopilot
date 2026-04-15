@@ -7,6 +7,7 @@ mod indexer;
 mod metadata;
 mod model;
 mod parser;
+mod report;
 
 pub use cli::run_cli;
 pub use embedding::build_embedding_records;

@@ -2,7 +2,8 @@ use crate::model::{Language, SymbolKind};
 
 pub(crate) fn extract_module_doc_comment(source: &str, language: Language) -> Option<String> {
     match language {
-        Language::Typescript | Language::Rust => extract_top_doc_comment(source, language),
+        Language::Typescript => extract_top_doc_comment(source, language),
+        Language::Rust => extract_top_rust_module_doc_comment(source),
         Language::Python => extract_top_python_docstring(source),
     }
 }
@@ -126,6 +127,57 @@ fn extract_top_doc_comment(source: &str, language: Language) -> Option<String> {
 
         if is_doc_comment_line(trimmed, language) {
             collecting = true;
+            lines.push(trimmed.to_string());
+            continue;
+        }
+
+        break;
+    }
+
+    if lines.is_empty() {
+        None
+    } else {
+        Some(lines.join("\n"))
+    }
+}
+
+fn extract_top_rust_module_doc_comment(source: &str) -> Option<String> {
+    let mut lines = Vec::new();
+    let mut collecting_block = false;
+
+    for line in source.lines() {
+        let trimmed = line.trim();
+        if trimmed.is_empty() {
+            if !lines.is_empty() {
+                break;
+            }
+            continue;
+        }
+
+        if lines.is_empty() {
+            if trimmed.starts_with("//!") {
+                lines.push(trimmed.to_string());
+                continue;
+            }
+
+            if trimmed.starts_with("/*!") {
+                lines.push(trimmed.to_string());
+                collecting_block = !trimmed.ends_with("*/");
+                continue;
+            }
+
+            break;
+        }
+
+        if collecting_block {
+            lines.push(trimmed.to_string());
+            if trimmed.ends_with("*/") {
+                break;
+            }
+            continue;
+        }
+
+        if trimmed.starts_with("//!") {
             lines.push(trimmed.to_string());
             continue;
         }

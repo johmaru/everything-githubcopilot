@@ -9,6 +9,7 @@ const fs = require('fs');
 const path = require('path');
 
 const ROOT = path.join(__dirname, '../..');
+const README_PATH = path.join(ROOT, 'README.md');
 const GITHUB_DIR = path.join(ROOT, '.github');
 const COPILOT_INSTRUCTIONS = path.join(GITHUB_DIR, 'copilot-instructions.md');
 const INSTRUCTIONS_DIR = path.join(GITHUB_DIR, 'instructions');
@@ -537,6 +538,62 @@ function validateReviewRoutingContracts(errors) {
   );
 }
 
+function validateSemanticIndexerContracts(errors) {
+  const semanticIndexerSignals = ['semantic-indexer', 'entry-points:index', 'entry-points:query', 'rust:index'];
+  const readmeContent = fs.existsSync(README_PATH) ? readUtf8(README_PATH) : '';
+  const instructionsContent = fs.existsSync(COPILOT_INSTRUCTIONS) ? readUtf8(COPILOT_INSTRUCTIONS) : '';
+  const normalizedReadme = normalizeForAnchorCheck(readmeContent);
+  const normalizedInstructions = normalizeForAnchorCheck(instructionsContent);
+  const hasReadmeSignal = semanticIndexerSignals.some((signal) => normalizedReadme.includes(signal));
+  const hasInstructionsSignal = semanticIndexerSignals.some((signal) => normalizedInstructions.includes(signal));
+  const hasRepoLevelSignal = fs.existsSync(path.join(ROOT, 'package.json')) || fs.existsSync(path.join(ROOT, 'AGENTS.md'));
+
+  if (!hasReadmeSignal && !hasInstructionsSignal && !hasRepoLevelSignal) {
+    return;
+  }
+
+  if (hasRepoLevelSignal && !fs.existsSync(README_PATH)) {
+    errors.push(
+      `ERROR: P1-011: ${relative(README_PATH)} must keep semantic-indexer discovery and summary guidance visible in the README`
+    );
+  }
+
+  if (hasReadmeSignal || hasRepoLevelSignal) {
+    validateAnchoredContract(
+      README_PATH,
+      errors,
+      'P1-011',
+      'must keep semantic-indexer discovery and summary guidance visible in the README',
+      [
+        ['entry-points:index'],
+        ['entry-points:query'],
+        ['rust:index'],
+        ['--formatsummary'],
+        ['--filerust/semantic-indexer/src/cli.rs'],
+        ['semantic-indexer'],
+      ]
+    );
+  }
+
+  if (hasInstructionsSignal || hasRepoLevelSignal) {
+    validateAnchoredContract(
+      COPILOT_INSTRUCTIONS,
+      errors,
+      'P1-011',
+      'must keep semantic-indexer routing guidance for static AST analysis in workspace instructions',
+      [
+        ['semantic-indexer'],
+        ['entry-points:index'],
+        ['entry-points:query'],
+        ['rust:index'],
+        ['--formatsummary'],
+        ['--file'],
+        ['staticastsummary', 'exported-surfacecounts'],
+      ]
+    );
+  }
+}
+
 function validateAgents(files, errors, warnings) {
   const names = new Map();
   const handoffRefs = new Map();
@@ -613,6 +670,49 @@ function validatePrompts(files, customAgentNames, errors) {
   }
 }
 
+function validateCodexContracts(errors) {
+  const codexDir = path.join(ROOT, '.codex');
+  const codexAgentsFile = path.join(codexDir, 'AGENTS.md');
+  const codexConfig = path.join(codexDir, 'config.toml');
+
+  if (!fs.existsSync(codexDir)) {
+    return;
+  }
+
+  const requiredFiles = [
+    { filePath: codexAgentsFile, label: '.codex/AGENTS.md' },
+    { filePath: codexConfig, label: '.codex/config.toml' },
+  ];
+
+  for (const { filePath, label } of requiredFiles) {
+    if (!fs.existsSync(filePath)) {
+      errors.push(`ERROR: P1-012: ${label} is required when .codex/ compatibility surface exists`);
+    }
+  }
+
+  if (fs.existsSync(codexAgentsFile)) {
+    const content = readUtf8(codexAgentsFile);
+    const staleRefs = [
+      { pattern: '.agents/skills/', label: '.agents/skills/' },
+      { pattern: 'agents/openai.yaml', label: 'agents/openai.yaml' },
+      { pattern: 'scripts/sync-ecc-to-codex.sh', label: 'scripts/sync-ecc-to-codex.sh' },
+    ];
+
+    for (const { pattern, label } of staleRefs) {
+      if (content.includes(pattern)) {
+        errors.push(`ERROR: P1-012: .codex/AGENTS.md references non-existent path '${label}'`);
+      }
+    }
+  }
+
+  const readmeContent = fs.existsSync(README_PATH) ? readUtf8(README_PATH) : '';
+  if (readmeContent.length > 0 && !normalizeForAnchorCheck(readmeContent).includes('.codex')) {
+    errors.push(
+      `ERROR: P1-012: ${relative(README_PATH)} must document the .codex/ compatibility surface boundary`
+    );
+  }
+}
+
 function main() {
   const errors = [];
   const warnings = [];
@@ -626,6 +726,8 @@ function main() {
   const customAgentNames = validateAgents(agentFiles, errors, warnings);
   validatePrompts(promptFiles, customAgentNames, errors);
   validateReviewRoutingContracts(errors);
+  validateSemanticIndexerContracts(errors);
+  validateCodexContracts(errors);
 
   if (errors.length > 0) {
     for (const error of errors) {

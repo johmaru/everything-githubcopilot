@@ -329,7 +329,7 @@ function install() {
       totalCopied++;
     } else if (op.recursive) {
       fs.mkdirSync(dstPath, { recursive: true });
-      copyRecursive(srcPath, dstPath);
+      copyRecursive(srcPath, dstPath, op.excludeRelativePaths || []);
       const count = countFiles(dstPath);
       console.log(`  Copied ${op.src} -> ${op.dst} (${count} items)`);
       totalCopied += count;
@@ -503,16 +503,21 @@ function reinstall() {
   install();
 }
 
-function copyRecursive(src, dst) {
+function copyRecursive(src, dst, excludeRelativePaths = [], currentRelativePath = '') {
   fs.mkdirSync(dst, { recursive: true });
   const entries = fs.readdirSync(src, { withFileTypes: true });
 
   for (const entry of entries) {
     const srcPath = path.join(src, entry.name);
     const dstPath = path.join(dst, entry.name);
+    const entryRelativePath = currentRelativePath ? path.join(currentRelativePath, entry.name) : entry.name;
+
+    if (excludeRelativePaths.includes(entryRelativePath)) {
+      continue;
+    }
 
     if (entry.isDirectory()) {
-      copyRecursive(srcPath, dstPath);
+      copyRecursive(srcPath, dstPath, excludeRelativePaths, entryRelativePath);
     } else {
       fs.copyFileSync(srcPath, dstPath);
     }

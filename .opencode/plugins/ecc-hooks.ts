@@ -114,6 +114,8 @@ export const ECCHooksPlugin = async ({
       input: { tool: string; args?: { filePath?: string } },
       output: unknown
     ) => {
+      const cmd = String(input.args?.command || input.args || "")
+
       // Check if a TypeScript file was edited
       if (
         hookEnabled("post:edit:typecheck", ["strict"]) &&
@@ -138,7 +140,7 @@ export const ECCHooksPlugin = async ({
       if (
         hookEnabled("post:bash:pr-created", ["standard", "strict"]) &&
         input.tool === "bash" &&
-        input.args?.toString().includes("gh pr create")
+        cmd.includes("gh pr create")
       ) {
         log("info", "[ECC] PR created - check GitHub Actions status")
       }
@@ -154,11 +156,13 @@ export const ECCHooksPlugin = async ({
     "tool.execute.before": async (
       input: { tool: string; args?: Record<string, unknown> }
     ) => {
+      const cmd = String(input.args?.command || input.args || "")
+
       // Git push review reminder
       if (
         hookEnabled("pre:bash:git-push-reminder", "strict") &&
         input.tool === "bash" &&
-        input.args?.toString().includes("git push")
+        cmd.includes("git push")
       ) {
         log(
           "info",
@@ -190,7 +194,6 @@ export const ECCHooksPlugin = async ({
 
       // Long-running command reminder
       if (hookEnabled("pre:bash:tmux-reminder", "strict") && input.tool === "bash") {
-        const cmd = String(input.args?.command || input.args || "")
         if (
           cmd.match(/^(npm|pnpm|yarn|bun)\s+(install|build|test|run)/) ||
           cmd.match(/^cargo\s+(build|test|run)/) ||
@@ -400,7 +403,7 @@ export const ECCHooksPlugin = async ({
         "## Key Principles",
         "- TDD: write tests first, 80%+ coverage",
         "- Immutability: never mutate, always return new copies",
-        "- Security: validate inputs, no hardcoded secrets",
+        "- Security: validate inputs, no hardcoded credentials",
         "",
       ]
 

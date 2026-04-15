@@ -29,6 +29,15 @@ fn fixture_paths() -> [PathBuf; 4] {
     ]
 }
 
+fn rust_kinds_fixture_path() -> PathBuf {
+    repo_root()
+        .join("rust")
+        .join("semantic-indexer")
+        .join("tests")
+        .join("fixtures")
+        .join("rust_kinds.rs")
+}
+
 #[test]
 fn cli_outputs_json_for_repo_self_fixtures() {
     let root = repo_root();
@@ -268,4 +277,125 @@ fn cli_emits_unique_stable_symbol_ids_for_duplicate_names_in_same_file() {
         unique_ids.len(),
         "stable_symbol_id should be unique even when symbols share the same name"
     );
+}
+
+#[test]
+fn cli_extracts_additional_rust_symbol_kinds() {
+    let root = repo_root();
+    let fixture = rust_kinds_fixture_path();
+
+    let output = Command::new(env!("CARGO_BIN_EXE_semantic-indexer"))
+        .arg("--root")
+        .arg(&root)
+        .arg("--format")
+        .arg("json")
+        .arg("--file")
+        .arg(&fixture)
+        .output()
+        .unwrap();
+
+    assert!(
+        output.status.success(),
+        "CLI should exit successfully: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let records: Value = serde_json::from_slice(&output.stdout).unwrap();
+    let array = records.as_array().unwrap();
+
+    assert!(array.iter().any(|record| {
+        record["file_path"] == "rust/semantic-indexer/tests/fixtures/rust_kinds.rs"
+            && record["name"] == "Renderable"
+            && record["kind"] == "trait"
+            && record["is_exported"] == true
+    }));
+    assert!(array.iter().any(|record| {
+        record["file_path"] == "rust/semantic-indexer/tests/fixtures/rust_kinds.rs"
+            && record["name"] == "WidgetId"
+            && record["kind"] == "type_alias"
+            && record["is_exported"] == true
+    }));
+    assert!(array.iter().any(|record| {
+        record["file_path"] == "rust/semantic-indexer/tests/fixtures/rust_kinds.rs"
+            && record["name"] == "BUILD_VERSION"
+            && record["kind"] == "const"
+            && record["is_exported"] == true
+    }));
+    assert!(array.iter().any(|record| {
+        record["file_path"] == "rust/semantic-indexer/tests/fixtures/rust_kinds.rs"
+            && record["name"] == "WORKSPACE_ONLY"
+            && record["kind"] == "const"
+            && record["is_exported"] == false
+    }));
+    assert!(array.iter().any(|record| {
+        record["file_path"] == "rust/semantic-indexer/tests/fixtures/rust_kinds.rs"
+            && record["name"] == "INTERNAL_CACHE"
+            && record["kind"] == "static"
+            && record["is_exported"] == false
+    }));
+    assert!(array.iter().any(|record| {
+        record["file_path"] == "rust/semantic-indexer/tests/fixtures/rust_kinds.rs"
+            && record["name"] == "Widget"
+            && record["kind"] == "impl"
+    }));
+    assert!(array.iter().any(|record| {
+        record["file_path"] == "rust/semantic-indexer/tests/fixtures/rust_kinds.rs"
+            && record["name"] == "Renderable for Widget"
+            && record["kind"] == "impl"
+    }));
+    assert!(array.iter().any(|record| {
+        record["file_path"] == "rust/semantic-indexer/tests/fixtures/rust_kinds.rs"
+            && record["name"] == "widget_name"
+            && record["kind"] == "macro"
+            && record["is_exported"] == true
+            && record["export_kind"] == "macro_export"
+    }));
+}
+
+#[test]
+fn cli_outputs_summary_report_for_selected_rust_fixture() {
+    let root = repo_root();
+    let fixture = rust_kinds_fixture_path();
+
+    let output = Command::new(env!("CARGO_BIN_EXE_semantic-indexer"))
+        .arg("--root")
+        .arg(&root)
+        .arg("--format")
+        .arg("summary")
+        .arg("--file")
+        .arg(&fixture)
+        .output()
+        .unwrap();
+
+    assert!(
+        output.status.success(),
+        "CLI should exit successfully: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let report: Value = serde_json::from_slice(&output.stdout).unwrap();
+
+    assert_eq!(report["file_count"], 1);
+    assert_eq!(report["symbol_count"], 12);
+    assert_eq!(report["exported_symbol_count"], 6);
+    assert_eq!(report["doc_comment_count"], 3);
+    assert_eq!(report["doc_comment_coverage"], 3.0 / 12.0);
+    assert_eq!(report["languages"]["rust"], 12);
+    assert_eq!(report["kinds"]["module"], 1);
+    assert_eq!(report["kinds"]["trait"], 1);
+    assert_eq!(report["kinds"]["type_alias"], 1);
+    assert_eq!(report["kinds"]["const"], 2);
+    assert_eq!(report["kinds"]["static"], 1);
+    assert_eq!(report["kinds"]["struct"], 1);
+    assert_eq!(report["kinds"]["impl"], 2);
+    assert_eq!(report["kinds"]["function"], 2);
+    assert_eq!(report["kinds"]["macro"], 1);
+    assert_eq!(
+        report["top_files"][0]["file_path"],
+        "rust/semantic-indexer/tests/fixtures/rust_kinds.rs"
+    );
+    assert_eq!(report["top_files"][0]["symbol_count"], 12);
+    assert_eq!(report["top_files"][0]["exported_symbol_count"], 6);
+    assert_eq!(report["top_files"][0]["doc_comment_count"], 3);
+    assert_eq!(report["top_files"][0]["kinds"]["impl"], 2);
 }

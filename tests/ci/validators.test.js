@@ -215,6 +215,27 @@ function writeReviewRoutingFixture(testDir, overrides = {}) {
   }
 }
 
+function writeMinimalRepoFixtures(testDir) {
+  fs.mkdirSync(path.join(testDir, '.github', 'instructions'), { recursive: true });
+  fs.mkdirSync(path.join(testDir, '.github', 'prompts'), { recursive: true });
+  fs.mkdirSync(path.join(testDir, '.github', 'agents'), { recursive: true });
+  fs.writeFileSync(path.join(testDir, '.github', 'copilot-instructions.md'), '# ok\n');
+  writePlannerAgent(path.join(testDir, '.github', 'agents', 'planner.agent.md'));
+  writeAgent(path.join(testDir, '.github', 'agents', 'coder.agent.md'), [
+    'name: coder',
+    'description: coder',
+    'handoffs:',
+    '  - label: to planner',
+    '    agent: planner',
+    '  - label: to researcher',
+    '    agent: researcher',
+  ]);
+  writeAgent(path.join(testDir, '.github', 'agents', 'researcher.agent.md'), [
+    'name: researcher',
+    'description: researcher',
+  ]);
+}
+
 function normalizeHookCommand(command) {
   if (typeof command === 'string') {
     return command;
@@ -235,6 +256,33 @@ results.push(test('validate-copilot-customizations passes on the shipped reposit
   const result = runValidator('validate-copilot-customizations');
   assert.strictEqual(result.code, 0, result.stderr);
   assert.ok(result.stdout.includes('Validated Copilot customizations'));
+}));
+
+results.push(test('shipped docs and instructions document semantic indexer discovery paths', () => {
+  const readme = fs.readFileSync(path.join(repoRoot, 'README.md'), 'utf8');
+  const workspaceInstructions = fs.readFileSync(
+    path.join(repoRoot, '.github', 'copilot-instructions.md'),
+    'utf8'
+  );
+
+  assert.ok(readme.includes('entry-points:index'), 'README must document entry-points:index');
+  assert.ok(readme.includes('entry-points:query'), 'README must document entry-points:query');
+  assert.ok(readme.includes('rust:index'), 'README must document rust:index');
+  assert.ok(readme.includes('--file rust/semantic-indexer/src/cli.rs'), 'README must document targeted semantic-indexer file inspection');
+  assert.ok(readme.includes('--format summary'), 'README must document semantic-indexer summary output');
+  assert.ok(readme.includes('semantic-indexer'), 'README must mention semantic-indexer');
+  assert.ok(
+    workspaceInstructions.includes('semantic-indexer'),
+    'workspace instructions must mention semantic-indexer when static AST exploration is appropriate'
+  );
+  assert.ok(
+    workspaceInstructions.includes('--format summary'),
+    'workspace instructions must document semantic-indexer summary output for static AST analysis'
+  );
+  assert.ok(
+    workspaceInstructions.includes('--file <path>'),
+    'workspace instructions must document targeted semantic-indexer file inspection'
+  );
 }));
 
 results.push(test('validate-copilot-customizations fails on agent without frontmatter', () => {
@@ -498,6 +546,111 @@ results.push(test('validate-copilot-customizations enforces the root review-rout
     assert.strictEqual(errorLines.length, 1, result.stderr);
     assert.ok(errorLines[0].includes('P1-009'), 'validator must report the review-routing contract rule id');
     assert.ok(errorLines[0].includes('common-development-workflow.instructions.md'), 'validator must identify the broken source-of-truth workflow file');
+  } finally {
+    cleanupTestDir(testDir);
+  }
+}));
+
+results.push(test('validate-copilot-customizations enforces semantic-indexer summary guidance anchors', () => {
+  const testDir = createTestDir();
+  try {
+    writeReviewRoutingFixture(testDir, {
+      '.github/copilot-instructions.md': (source) => source.replace(
+        '`npm run rust:index -- --format summary`, ',
+        ''
+      ),
+    });
+    writeRepoFixture(testDir, 'README.md');
+
+    const result = runValidatorWithOverrides('validate-copilot-customizations', {
+      ROOT: testDir,
+      GITHUB_DIR: path.join(testDir, '.github'),
+      COPILOT_INSTRUCTIONS: path.join(testDir, '.github', 'copilot-instructions.md'),
+      INSTRUCTIONS_DIR: path.join(testDir, '.github', 'instructions'),
+      PROMPTS_DIR: path.join(testDir, '.github', 'prompts'),
+      AGENTS_DIR: path.join(testDir, '.github', 'agents'),
+      COMMON_AGENTS_INSTRUCTIONS: path.join(testDir, '.github', 'instructions', 'common-agents.instructions.md'),
+      COMMON_DEVELOPMENT_WORKFLOW: path.join(testDir, '.github', 'instructions', 'common-development-workflow.instructions.md'),
+      KNOWLEDGE_AUDIT_PROMPT: path.join(testDir, '.github', 'prompts', 'knowledge-audit.prompt.md'),
+      VERIFY_PROMPT: path.join(testDir, '.github', 'prompts', 'verify.prompt.md'),
+      CODER_AGENT: path.join(testDir, '.github', 'agents', 'coder.agent.md'),
+      SAFETY_CHECKER_AGENT: path.join(testDir, '.github', 'agents', 'safety-checker.agent.md'),
+    });
+
+    assert.strictEqual(result.code, 1, result.stderr);
+    const errorLines = result.stderr.trim().split(/\r?\n/).filter(Boolean);
+    assert.ok(errorLines.some((line) => line.includes('P1-011')), 'validator must report the semantic-indexer guidance rule id');
+    assert.ok(errorLines.some((line) => line.includes('copilot-instructions.md')), 'validator must identify the broken workspace instruction guidance surface');
+  } finally {
+    cleanupTestDir(testDir);
+  }
+}));
+
+results.push(test('validate-copilot-customizations still enforces semantic-indexer guidance when both docs lose anchors in a repo-level fixture', () => {
+  const testDir = createTestDir();
+  try {
+    writeReviewRoutingFixture(testDir, {
+      '.github/copilot-instructions.md': (source) => source
+        .replace('`npm run entry-points:index`, ', '')
+        .replace('`npm run entry-points:query`, ', '')
+        .replace('`npm run rust:index -- --format summary`, ', '')
+        .replace('or targeted `npm run rust:index -- --file <path>` calls ', '')
+        .replace('Use `semantic-indexer` through ', 'Use code search through '),
+    });
+    writeRepoFixture(testDir, 'README.md', (source) => source
+      .replace('`npm run entry-points:index -- --root .`, ', '')
+      .replace('`npm run entry-points:query -- --root . --query "semantic indexer"`, ', '')
+      .replace('`npm run rust:index -- --root . --format summary`, ', '')
+      .replace('semantic-indexer summaries, and direct semantic-indexer CLI access', 'code-search summaries and direct CLI access')
+      .replace('semantic-indexer', 'indexer'));
+    writeRepoFixture(testDir, 'package.json');
+
+    const result = runValidatorWithOverrides('validate-copilot-customizations', {
+      ROOT: testDir,
+      GITHUB_DIR: path.join(testDir, '.github'),
+      COPILOT_INSTRUCTIONS: path.join(testDir, '.github', 'copilot-instructions.md'),
+      INSTRUCTIONS_DIR: path.join(testDir, '.github', 'instructions'),
+      PROMPTS_DIR: path.join(testDir, '.github', 'prompts'),
+      AGENTS_DIR: path.join(testDir, '.github', 'agents'),
+      COMMON_AGENTS_INSTRUCTIONS: path.join(testDir, '.github', 'instructions', 'common-agents.instructions.md'),
+      COMMON_DEVELOPMENT_WORKFLOW: path.join(testDir, '.github', 'instructions', 'common-development-workflow.instructions.md'),
+      KNOWLEDGE_AUDIT_PROMPT: path.join(testDir, '.github', 'prompts', 'knowledge-audit.prompt.md'),
+      VERIFY_PROMPT: path.join(testDir, '.github', 'prompts', 'verify.prompt.md'),
+      CODER_AGENT: path.join(testDir, '.github', 'agents', 'coder.agent.md'),
+      SAFETY_CHECKER_AGENT: path.join(testDir, '.github', 'agents', 'safety-checker.agent.md'),
+    });
+
+    assert.strictEqual(result.code, 1, result.stderr);
+    assert.ok(result.stderr.includes('P1-011'), 'validator must keep enforcing semantic-indexer guidance in repo-level fixtures');
+  } finally {
+    cleanupTestDir(testDir);
+  }
+}));
+
+results.push(test('validate-copilot-customizations requires README for repo-level semantic-indexer guidance', () => {
+  const testDir = createTestDir();
+  try {
+    writeReviewRoutingFixture(testDir);
+    writeRepoFixture(testDir, 'package.json');
+
+    const result = runValidatorWithOverrides('validate-copilot-customizations', {
+      ROOT: testDir,
+      GITHUB_DIR: path.join(testDir, '.github'),
+      COPILOT_INSTRUCTIONS: path.join(testDir, '.github', 'copilot-instructions.md'),
+      INSTRUCTIONS_DIR: path.join(testDir, '.github', 'instructions'),
+      PROMPTS_DIR: path.join(testDir, '.github', 'prompts'),
+      AGENTS_DIR: path.join(testDir, '.github', 'agents'),
+      COMMON_AGENTS_INSTRUCTIONS: path.join(testDir, '.github', 'instructions', 'common-agents.instructions.md'),
+      COMMON_DEVELOPMENT_WORKFLOW: path.join(testDir, '.github', 'instructions', 'common-development-workflow.instructions.md'),
+      KNOWLEDGE_AUDIT_PROMPT: path.join(testDir, '.github', 'prompts', 'knowledge-audit.prompt.md'),
+      VERIFY_PROMPT: path.join(testDir, '.github', 'prompts', 'verify.prompt.md'),
+      CODER_AGENT: path.join(testDir, '.github', 'agents', 'coder.agent.md'),
+      SAFETY_CHECKER_AGENT: path.join(testDir, '.github', 'agents', 'safety-checker.agent.md'),
+    });
+
+    assert.strictEqual(result.code, 1, result.stderr);
+    assert.ok(result.stderr.includes('P1-011'), 'validator must report the semantic-indexer guidance rule id when README is missing');
+    assert.ok(result.stderr.includes('README.md'), 'validator must identify the missing README guidance surface');
   } finally {
     cleanupTestDir(testDir);
   }
@@ -1612,7 +1765,13 @@ results.push(test('review routing policy keeps researcher as default and code-re
   assert.ok(compatibilityReadme.includes('AGENTS.md') && compatibilityReadme.includes('skills/*') && compatibilityReadme.includes('POSIX-style shell utilities') && !compatibilityReadme.includes('Check for secrets'), 'OpenCode README must document the package asset boundary, OS caveat, and actual pre-tool hook behavior');
   assert.ok(compatibilityMigration.includes('High-risk or cross-cutting review') && compatibilityMigration.includes('doc-updater') && compatibilityMigration.includes('26 configured commands') && compatibilityMigration.includes('AGENTS.md') && compatibilityMigration.includes('skills/*') && compatibilityMigration.includes('POSIX-style shell commands') && !compatibilityMigration.includes('Check for secrets before commit'), 'OpenCode migration doc must keep the high-risk code-reviewer wording, package boundary guidance, OS caveat, and shipped hook semantics');
   assert.ok(compatibilityConfig.includes('Reviews high-risk or cross-cutting changes') && compatibilityConfig.includes('Review high-risk or cross-cutting changes'), 'OpenCode config must keep high-risk-only code-review routing for both the agent and command descriptions');
-  assert.ok(compatibilityPlugin.includes('hookEnabled("post:edit:format", ["strict"])') && compatibilityPlugin.includes('hookEnabled("post:edit:typecheck", ["strict"])') && !compatibilityPlugin.includes('secret'), 'OpenCode plugin implementation must show strict-only format/typecheck and no built-in secret scan');
+  assert.ok(
+    compatibilityPlugin.includes('hookEnabled("post:edit:format", ["strict"])')
+      && compatibilityPlugin.includes('hookEnabled("post:edit:typecheck", ["strict"])')
+      && !compatibilityPlugin.includes('scanForSecrets')
+      && !compatibilityPlugin.includes('Secret Detection'),
+    'OpenCode plugin implementation must show strict-only format/typecheck and no built-in secret scan'
+  );
   assert.ok(compatibilityPackage.includes('"commands"') && !compatibilityPackage.includes('AGENTS.md') && !compatibilityPackage.includes('CONTRIBUTING.md') && !compatibilityPackage.includes('skills'), 'OpenCode package manifest must continue to omit repo-level docs and skill assets from the published files list');
   assert.ok(scriptsAgents.includes('High-risk code just written/modified') && scriptsAgents.includes('coder') && scriptsAgents.includes('researcher'), 'scripts/.github common-agents copy must stay aligned with the root routing structure');
   assert.ok(scriptsWorkflow.includes('Repo-internal dependency tracing first') && scriptsWorkflow.includes('default implementation review') && scriptsWorkflow.includes('high-risk changes'), 'scripts/.github workflow copy must stay aligned with the root review routing and static exploration priority');
@@ -1645,6 +1804,85 @@ results.push(test('knowledge-audit, safety-checker, and verify contracts keep th
   assert.ok(safetyCheckerAgent.includes('immediately after high-risk coder edits') && safetyCheckerAgent.includes('settings changes'), 'safety-checker agent must keep the high-risk timing and settings-change scope explicit');
   assert.ok(coderAgent.includes('High-risk edit直後に安全性チェックを省略しない') && coderAgent.includes('広い回帰確認は最終確認または high-risk closeout'), 'coder agent must keep the high-risk safety-check and deferred broad regression rules');
   assert.ok(verifyPrompt.includes('final verification or high-risk change sets'), 'verify prompt must keep broad regression checks scoped to final verification or high-risk change sets');
+}));
+
+results.push(test('validate-copilot-customizations detects stale .codex/AGENTS.md references', () => {
+  const testDir = createTestDir();
+  try {
+    writeMinimalRepoFixtures(testDir);
+    fs.mkdirSync(path.join(testDir, '.codex'), { recursive: true });
+    fs.writeFileSync(path.join(testDir, '.codex', 'config.toml'), 'approval_policy = "on-request"\n');
+    fs.writeFileSync(path.join(testDir, '.codex', 'AGENTS.md'), '# Codex\n\nSkills are loaded from `.agents/skills/`.\n');
+    fs.writeFileSync(path.join(testDir, 'README.md'), '# Test\n\n`.codex/` is a compatibility surface.\n');
+
+    const result = runValidatorWithOverrides('validate-copilot-customizations', {
+      ROOT: testDir,
+      GITHUB_DIR: path.join(testDir, '.github'),
+      README_PATH: path.join(testDir, 'README.md'),
+      COPILOT_INSTRUCTIONS: path.join(testDir, '.github', 'copilot-instructions.md'),
+      INSTRUCTIONS_DIR: path.join(testDir, '.github', 'instructions'),
+      PROMPTS_DIR: path.join(testDir, '.github', 'prompts'),
+      AGENTS_DIR: path.join(testDir, '.github', 'agents'),
+    });
+
+    assert.strictEqual(result.code, 1, 'should fail on stale .codex/AGENTS.md references');
+    assert.ok(result.stderr.includes('P1-012'), 'should report P1-012 error');
+    assert.ok(result.stderr.includes('.agents/skills/'), 'should identify the stale reference');
+  } finally {
+    cleanupTestDir(testDir);
+  }
+}));
+
+results.push(test('validate-copilot-customizations requires README to document .codex boundary', () => {
+  const testDir = createTestDir();
+  try {
+    writeMinimalRepoFixtures(testDir);
+    fs.mkdirSync(path.join(testDir, '.codex'), { recursive: true });
+    fs.writeFileSync(path.join(testDir, '.codex', 'config.toml'), 'approval_policy = "on-request"\n');
+    fs.writeFileSync(path.join(testDir, '.codex', 'AGENTS.md'), '# Codex CLI guidance\n');
+    fs.writeFileSync(path.join(testDir, 'README.md'), '# Test\n\nNo codex mention here.\n');
+
+    const result = runValidatorWithOverrides('validate-copilot-customizations', {
+      ROOT: testDir,
+      GITHUB_DIR: path.join(testDir, '.github'),
+      README_PATH: path.join(testDir, 'README.md'),
+      COPILOT_INSTRUCTIONS: path.join(testDir, '.github', 'copilot-instructions.md'),
+      INSTRUCTIONS_DIR: path.join(testDir, '.github', 'instructions'),
+      PROMPTS_DIR: path.join(testDir, '.github', 'prompts'),
+      AGENTS_DIR: path.join(testDir, '.github', 'agents'),
+    });
+
+    assert.strictEqual(result.code, 1, 'should fail when README does not mention .codex');
+    assert.ok(result.stderr.includes('P1-012'), 'should report P1-012 error');
+    assert.ok(result.stderr.includes('.codex'), 'should mention .codex boundary requirement');
+  } finally {
+    cleanupTestDir(testDir);
+  }
+}));
+
+results.push(test('validate-copilot-customizations passes when .codex is clean and README documents it', () => {
+  const testDir = createTestDir();
+  try {
+    writeMinimalRepoFixtures(testDir);
+    fs.mkdirSync(path.join(testDir, '.codex'), { recursive: true });
+    fs.writeFileSync(path.join(testDir, '.codex', 'config.toml'), 'approval_policy = "on-request"\n');
+    fs.writeFileSync(path.join(testDir, '.codex', 'AGENTS.md'), '# Codex CLI guidance\n');
+    fs.writeFileSync(path.join(testDir, 'README.md'), '# Test\n\n`.codex/` is a compatibility surface.\n');
+
+    const result = runValidatorWithOverrides('validate-copilot-customizations', {
+      ROOT: testDir,
+      GITHUB_DIR: path.join(testDir, '.github'),
+      README_PATH: path.join(testDir, 'README.md'),
+      COPILOT_INSTRUCTIONS: path.join(testDir, '.github', 'copilot-instructions.md'),
+      INSTRUCTIONS_DIR: path.join(testDir, '.github', 'instructions'),
+      PROMPTS_DIR: path.join(testDir, '.github', 'prompts'),
+      AGENTS_DIR: path.join(testDir, '.github', 'agents'),
+    });
+
+    assert.strictEqual(result.code, 0, result.stderr);
+  } finally {
+    cleanupTestDir(testDir);
+  }
 }));
 
 const passed = results.filter(Boolean).length;

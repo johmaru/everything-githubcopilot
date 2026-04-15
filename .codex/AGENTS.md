@@ -4,20 +4,21 @@ This supplements the root `AGENTS.md` with Codex-specific guidance.
 
 ## Model Recommendations
 
-| Task Type | Recommended Model |
-|-----------|------------------|
-| Routine coding, tests, formatting | GPT 5.4 |
-| Complex features, architecture | GPT 5.4 |
-| Debugging, refactoring | GPT 5.4 |
-| Security review | GPT 5.4 |
+| Task Type                         | Recommended Model |
+| --------------------------------- | ----------------- |
+| Routine coding, tests, formatting | GPT 5.4           |
+| Complex features, architecture    | GPT 5.4           |
+| Debugging, refactoring            | GPT 5.4           |
+| Security review                   | GPT 5.4           |
 
 ## Skills Discovery
 
-Skills are auto-loaded from `.agents/skills/`. Each skill contains:
+Skills are defined under `.github/skills/` in this repository. Each skill contains:
+
 - `SKILL.md` — Detailed instructions and workflow
-- `agents/openai.yaml` — Codex interface metadata
 
 Available skills:
+
 - tdd-workflow — Test-driven development with 80%+ coverage
 - security-review — Comprehensive security checklist
 - coding-standards — Universal coding standards
@@ -46,16 +47,7 @@ Available skills:
 
 Treat the project-local `.codex/config.toml` as the default Codex baseline for ECC. The current ECC baseline enables GitHub, Context7, Exa, Memory, Playwright, and Sequential Thinking; add heavier extras in `~/.codex/config.toml` only when a task actually needs them.
 
-### Automatic config.toml merging
-
-The sync script (`scripts/sync-ecc-to-codex.sh`) uses a Node-based TOML parser to safely merge ECC MCP servers into `~/.codex/config.toml`:
-
-- **Add-only by default** — missing ECC servers are appended; existing servers are never modified or removed.
-- **7 managed servers** — Supabase, Playwright, Context7, Exa, GitHub, Memory, Sequential Thinking.
-- **Package-manager aware** — uses the project's configured package manager (npm/pnpm/yarn/bun) instead of hardcoding `pnpm`.
-- **Drift warnings** — if an existing server's config differs from the ECC recommendation, the script logs a warning.
-- **`--update-mcp`** — explicitly replaces all ECC-managed servers with the latest recommended config (safely removes subtables like `[mcp_servers.supabase.env]`).
-- **User config is always preserved** — custom servers, args, env vars, and credentials outside ECC-managed sections are never touched.
+To customize MCP servers, edit `.codex/config.toml` directly or add user-level overrides in `~/.codex/config.toml`.
 
 ## Multi-Agent Support
 
@@ -67,25 +59,27 @@ Codex now supports multi-agent workflows behind the experimental `features.multi
 - Use `/agent` inside Codex CLI to inspect and steer child agents
 
 Sample role configs in this repo:
+
 - `.codex/agents/explorer.toml` — read-only evidence gathering
 - `.codex/agents/reviewer.toml` — correctness/security review
 - `.codex/agents/docs-researcher.toml` — API and release-note verification
 
 ## Key Differences from Claude Code
 
-| Feature | Claude Code | Codex CLI |
-|---------|------------|-----------|
-| Hooks | 8+ event types | Not yet supported |
-| Context file | CLAUDE.md + AGENTS.md | AGENTS.md only |
-| Skills | Skills loaded via plugin | `.agents/skills/` directory |
-| Commands | `/slash` commands | Instruction-based |
-| Agents | Subagent Task tool | Multi-agent via `/agent` and `[agents.<name>]` roles |
-| Security | Hook-based enforcement | Instruction + sandbox |
-| MCP | Full support | Supported via `config.toml` and `codex mcp add` |
+| Feature      | Claude Code              | Codex CLI                                            |
+| ------------ | ------------------------ | ---------------------------------------------------- |
+| Hooks        | 8+ event types           | Not yet supported                                    |
+| Context file | CLAUDE.md + AGENTS.md    | AGENTS.md only                                       |
+| Skills       | Skills loaded via plugin | `.github/skills/` directory                          |
+| Commands     | `/slash` commands        | Instruction-based                                    |
+| Agents       | Subagent Task tool       | Multi-agent via `/agent` and `[agents.<name>]` roles |
+| Security     | Hook-based enforcement   | Instruction + sandbox                                |
+| MCP          | Full support             | Supported via `config.toml` and `codex mcp add`      |
 
 ## Security Without Hooks
 
 Since Codex lacks hooks, security enforcement is instruction-based:
+
 1. Always validate inputs at system boundaries
 2. Never hardcode secrets — use environment variables
 3. Run `npm audit` / `pip audit` before committing

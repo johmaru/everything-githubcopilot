@@ -11,6 +11,11 @@ This repository is a GitHub Copilot customization pack for VS Code. `.github/` i
 - `.github/hooks/` — deterministic hook automations
 - `.github/skills/` — agent skills
 
+### Compatibility Surfaces
+
+- `.codex/` — Codex CLI compatibility surface (config, agents, AGENTS.md). Distributed via project setup. Not the active source of truth; `.github/` takes precedence.
+- `.opencode/` — OpenCode compatibility surface.
+
 ## Working Rules
 
 - Keep always-on guidance short. Put path-specific rules in `.instructions.md` files.

@@ -97,7 +97,7 @@ Copy all Copilot customizations (instructions, prompts, agents, hooks, skills) i
 
 An explicit target path is required, and it must be outside the source checkout. The setup wrappers no longer fall back to the parent directory of the source repository.
 
-This copies the shared project payload into the target project: `.github/` assets, `.github/workflows/`, `.vscode/settings.json` when absent, `AGENTS.md`, `schemas/`, `scripts/ci/`, `scripts/hooks/`, `tests/fixtures/`, and `rust/semantic-indexer/`. It preserves an existing `.vscode/settings.json` with a warning instead of overwriting it.
+This copies the shared project payload into the target project: `.github/` assets, `.github/workflows/`, `.vscode/settings.json` when absent, `AGENTS.md`, `.codex/` (Codex CLI compatibility surface), `schemas/`, `scripts/ci/`, `scripts/hooks/`, `tests/fixtures/`, and `rust/semantic-indexer/`. It preserves an existing `.vscode/settings.json` with a warning instead of overwriting it.
 
 Runtime dependencies now install from the target project's package manager when setup can detect one (`packageManager`, `pnpm-lock.yaml`, `yarn.lock`, `package-lock.json`, or `bun.lockb` / `bun.lock`), and fall back to `npm` otherwise. The bundled runtime set is `@huggingface/transformers`, `ajv`, `better-sqlite3`, and `sqlite-vec`.
 
@@ -105,7 +105,9 @@ Runtime dependencies now install from the target project's package manager when 
 
 ## Install User-Level
 
-Install instructions, agents, skills, prompts, hooks, and schemas into `~/.copilot/` for the current user and update VS Code user settings so every workspace can discover them.
+Install instructions, agents, skills, prompts, hooks, and schemas into `~/.copilot/` for the current user, ship the Rust semantic indexer payload for local AST exploration, and update VS Code user settings so every workspace can discover the supported customization surfaces.
+
+> **Note:** The user-level installer targets VS Code Copilot only. `.codex/` is not installed to `~/.copilot/` because Codex CLI reads `.codex/` from the project root. Use the project setup command to distribute `.codex/` into your projects.
 
 The installer now syncs the shipped VS Code discovery baseline for user settings: `~/.copilot` instructions, agents, skills, prompts, and hooks are enabled, `AGENTS.md` discovery is enabled, `CLAUDE.md` discovery stays disabled, and legacy `.claude` instruction / hook locations are explicitly turned off.
 
@@ -153,6 +155,7 @@ The installer intentionally does not invent unsupported Autopilot, default-appro
 - **Verification:** `/verify` reruns the repository verification loop on the current change set and reports regressions or remaining risks without changing files by default
 - **Knowledge audit:** `/knowledge-audit` checks instructions, skills, prompts, and agents for staleness, contradictions, duplication, or coverage gaps
 - **Language reviews:** `/typescript-review`, `/python-review`, `/go-review`
+- **Static AST exploration:** `npm run entry-points:index -- --root .`, `npm run entry-points:query -- --root . --query "semantic indexer"`, `npm run rust:index -- --root . --format summary`, and `npm run rust:index -- --root . --file rust/semantic-indexer/src/cli.rs` cover repo-wide indexing, ranked entry-point lookup, aggregate semantic-indexer summaries, and direct semantic-indexer CLI access when you need file-level symbol inventories, kind/export/doc-coverage reports, or raw AST records for exported API and symbol-density analysis.
 - **User-visible agents:** `planner`, `coder`, `researcher`, `supporter` — directly invocable for planning, implementation, deep investigation, and safer support without edits
 - **Internal specialists:** `architect`, `tdd-guide`, `code-reviewer`, `security-reviewer`, `build-error-resolver`, `docs-lookup`, `e2e-runner`, `refactor-cleaner`, `best-practice-researcher`, `typescript-reviewer`, `python-reviewer`, `go-reviewer`, `agent-auditor`, `code-structure-auditor`, `design-coherence-auditor`, `knowledge-curator`, `safety-checker` — explicitly invoked by core agents or prompts
 
@@ -181,6 +184,11 @@ The installer intentionally does not invent unsupported Autopilot, default-appro
   hooks/deterministic-hooks.json   # Deterministic edit/validation hooks
   skills/                          # 120+ skill definitions
   workflows/                       # CI validation
+
+.codex/                            # Codex CLI compatibility surface
+  config.toml                      # Codex reference configuration
+  AGENTS.md                        # Codex-specific guidance
+  agents/                          # Codex multi-agent role configs
 
 .vscode/
   settings.json                    # VS Code workspace settings

@@ -3,7 +3,8 @@ use tree_sitter::Node;
 use anyhow::Result;
 
 use crate::metadata::{
-    build_signature, extract_doc_comment, extract_module_doc_comment, summarize_module_source,
+    build_signature, collapse_whitespace, extract_doc_comment, extract_module_doc_comment,
+    summarize_module_source,
 };
 use crate::model::{Language, Position, Range, SymbolKind, SymbolRecord};
 
@@ -193,49 +194,50 @@ fn collect_rust_symbols(
 
     match node.kind() {
         "function_item" => {
-            if let Some(name_node) = node.child_by_field_name("name") {
-                push_symbol(
-                    symbols,
-                    SymbolContext {
-                        export_context: rust_export_context(node, source),
-                        ..context
-                    },
-                    SymbolKind::Function,
-                    text_for_node(name_node, source),
-                    node,
-                );
-            }
+            push_named_rust_symbol(node, source, symbols, context, SymbolKind::Function);
             return Ok(());
         }
         "struct_item" => {
-            if let Some(name_node) = node.child_by_field_name("name") {
-                push_symbol(
-                    symbols,
-                    SymbolContext {
-                        export_context: rust_export_context(node, source),
-                        ..context
-                    },
-                    SymbolKind::Struct,
-                    text_for_node(name_node, source),
-                    node,
-                );
-            }
+            push_named_rust_symbol(node, source, symbols, context, SymbolKind::Struct);
             return Ok(());
         }
         "enum_item" => {
-            if let Some(name_node) = node.child_by_field_name("name") {
+            push_named_rust_symbol(node, source, symbols, context, SymbolKind::Enum);
+            return Ok(());
+        }
+        "trait_item" => {
+            push_named_rust_symbol(node, source, symbols, context, SymbolKind::Trait);
+            return Ok(());
+        }
+        "type_item" => {
+            push_named_rust_symbol(node, source, symbols, context, SymbolKind::TypeAlias);
+            return Ok(());
+        }
+        "const_item" => {
+            push_named_rust_symbol(node, source, symbols, context, SymbolKind::Const);
+            return Ok(());
+        }
+        "static_item" => {
+            push_named_rust_symbol(node, source, symbols, context, SymbolKind::Static);
+            return Ok(());
+        }
+        "macro_definition" => {
+            push_named_rust_symbol(node, source, symbols, context, SymbolKind::Macro);
+            return Ok(());
+        }
+        "impl_item" => {
+            if let Some(name) = rust_impl_name(node, source) {
                 push_symbol(
                     symbols,
                     SymbolContext {
                         export_context: rust_export_context(node, source),
                         ..context
                     },
-                    SymbolKind::Enum,
-                    text_for_node(name_node, source),
+                    SymbolKind::Impl,
+                    name,
                     node,
                 );
             }
-            return Ok(());
         }
         _ => {}
     }
@@ -408,14 +410,80 @@ fn build_symbol_record(
     }
 }
 
+fn push_named_rust_symbol(
+    node: Node<'_>,
+    source: &str,
+    symbols: &mut Vec<SymbolRecord>,
+    context: SymbolContext<'_>,
+    kind: SymbolKind,
+) {
+    let Some(name_node) = node.child_by_field_name("name") else {
+        return;
+    };
+
+    push_symbol(
+        symbols,
+        SymbolContext {
+            export_context: rust_export_context(node, source),
+            ..context
+        },
+        kind,
+        text_for_node(name_node, source),
+        node,
+    );
+}
+
+fn rust_impl_name(node: Node<'_>, source: &str) -> Option<String> {
+    let type_name = node
+        .child_by_field_name("type")
+        .map(|type_node| text_for_node(type_node, source))?;
+
+    match node.child_by_field_name("trait") {
+        Some(trait_node) => Some(collapse_whitespace(&format!(
+            "{} for {}",
+            text_for_node(trait_node, source),
+            type_name
+        ))),
+        None => Some(collapse_whitespace(&type_name)),
+    }
+}
+
 fn rust_export_context(node: Node<'_>, source: &str) -> Option<ExportContext<'static>> {
+    let prefix = &source[..node.start_byte().min(source.len())];
+    for line in prefix.lines().rev() {
+        let trimmed = line.trim();
+        if trimmed.is_empty() {
+            break;
+        }
+
+        if trimmed.starts_with("#[") {
+            if trimmed.starts_with("#[macro_export") {
+                return Some(ExportContext {
+                    export_kind: "macro_export",
+                });
+            }
+            continue;
+        }
+
+        if trimmed.starts_with("///")
+            || trimmed.starts_with("//!")
+            || trimmed.starts_with("/**")
+            || trimmed.starts_with('*')
+            || trimmed.starts_with("*/")
+        {
+            continue;
+        }
+
+        break;
+    }
+
     let node_text = text_for_node(node, source);
     let first_line = node_text
         .lines()
         .find(|line| !line.trim().is_empty())
         .map(str::trim_start)?;
 
-    if first_line.starts_with("pub ") || first_line.starts_with("pub(") {
+    if first_line.starts_with("pub ") {
         Some(ExportContext { export_kind: "pub" })
     } else {
         None

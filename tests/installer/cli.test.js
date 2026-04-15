@@ -316,6 +316,45 @@ results.push(test('install and uninstall round-trip the shipped eval fixtures', 
   }
 }));
 
+results.push(test('install copies the semantic indexer payload without Rust build artifacts', () => {
+  const tempHome = createTestDir('egc-installer-home-');
+  const tempVs = createTestDir('egc-installer-vscode-');
+
+  try {
+    const copilotBase = path.join(tempHome, '.copilot');
+    const vsSettings = path.join(tempVs, 'settings.json');
+    fs.mkdirSync(path.dirname(vsSettings), { recursive: true });
+    fs.writeFileSync(vsSettings, '{}\n');
+
+    runInstaller('install', {
+      EGCOPILOT_COPILOT_BASE: copilotBase,
+      EGCOPILOT_VSCODE_SETTINGS: vsSettings,
+    });
+
+    assert.ok(
+      fs.existsSync(path.join(copilotBase, 'rust', 'semantic-indexer', 'Cargo.toml')),
+      'install should copy the semantic indexer payload'
+    );
+    assert.ok(
+      !fs.existsSync(path.join(copilotBase, 'rust', 'semantic-indexer', 'target')),
+      'install should not copy Rust build artifacts'
+    );
+
+    runInstaller('uninstall', {
+      EGCOPILOT_COPILOT_BASE: copilotBase,
+      EGCOPILOT_VSCODE_SETTINGS: vsSettings,
+    });
+
+    assert.ok(
+      !fs.existsSync(path.join(copilotBase, 'rust', 'semantic-indexer')),
+      'uninstall should remove the copied semantic indexer payload'
+    );
+  } finally {
+    cleanupTestDir(tempHome);
+    cleanupTestDir(tempVs);
+  }
+}));
+
 results.push(test('install allows the existing GitHub Copilot ide directory and preserves it on uninstall', () => {
   const tempHome = createTestDir('egc-installer-home-');
   const tempVs = createTestDir('egc-installer-vscode-');

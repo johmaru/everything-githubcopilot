@@ -94,7 +94,10 @@ export class Greeter {
         assert!(symbols[1].is_exported);
         assert_eq!(symbols[2].kind, SymbolKind::Class);
         assert_eq!(symbols[2].name, "Greeter");
-        assert_eq!(symbols[0].source_text, "/** Example module */\nexport function greet(name: string): string {");
+        assert_eq!(
+            symbols[0].source_text,
+            "/** Example module */\nexport function greet(name: string): string {"
+        );
         assert!(
             symbols
                 .iter()
@@ -207,6 +210,40 @@ pub fn parse() -> IndexRecord {
             symbols
                 .iter()
                 .any(|symbol| symbol.source_text.contains("pub struct IndexRecord"))
+        );
+    }
+
+    #[test]
+    fn rust_module_summary_does_not_reuse_outer_item_doc_comments() {
+        let source = r#"
+/// Renderable capability boundary.
+pub trait Renderable {
+    fn render(&self) -> String;
+}
+"#;
+
+        let symbols = extract_symbols_from_source_with_language(
+            source,
+            "fixtures/trait-doc.rs",
+            Language::Rust,
+        )
+        .unwrap();
+
+        let module_symbol = symbols
+            .iter()
+            .find(|symbol| symbol.kind == SymbolKind::Module)
+            .expect("module symbol should exist");
+        let trait_symbol = symbols
+            .iter()
+            .find(|symbol| symbol.kind == SymbolKind::Trait)
+            .expect("trait symbol should exist");
+
+        assert_eq!(module_symbol.doc_comment, None);
+        assert!(!module_symbol.has_doc_comment);
+        assert_eq!(module_symbol.source_text, "pub trait Renderable {");
+        assert_eq!(
+            trait_symbol.doc_comment,
+            Some(String::from("/// Renderable capability boundary."))
         );
     }
 
