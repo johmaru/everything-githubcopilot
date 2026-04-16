@@ -7,74 +7,74 @@
 
 # Block edits to linter and formatter config files
 prefix_rule(
-    pattern = "eslint.config",
+    pattern = ["eslint.config"],
     decision = "forbidden",
     justification = "Linter config is protected. Do not weaken validation rules.",
 )
 
 prefix_rule(
-    pattern = ".eslintrc",
+    pattern = [".eslintrc"],
     decision = "forbidden",
     justification = "Linter config is protected. Do not weaken validation rules.",
 )
 
 prefix_rule(
-    pattern = "prettier.config",
+    pattern = ["prettier.config"],
     decision = "forbidden",
     justification = "Formatter config is protected. Do not modify formatting rules.",
 )
 
 prefix_rule(
-    pattern = ".prettierrc",
+    pattern = [".prettierrc"],
     decision = "forbidden",
     justification = "Formatter config is protected. Do not modify formatting rules.",
 )
 
 prefix_rule(
-    pattern = "commitlint.config",
+    pattern = ["commitlint.config"],
     decision = "forbidden",
     justification = "Commit lint config is protected.",
 )
 
 prefix_rule(
-    pattern = ".markdownlint",
+    pattern = [".markdownlint"],
     decision = "forbidden",
     justification = "Markdown lint config is protected.",
 )
 
 prefix_rule(
-    pattern = "stylelint.config",
+    pattern = ["stylelint.config"],
     decision = "forbidden",
     justification = "Style lint config is protected.",
 )
 
 # Require confirmation for high-risk operations
 prefix_rule(
-    pattern = "git push --force",
+    pattern = ["git", "push", "--force"],
     decision = "prompt",
     justification = "Force push requires explicit confirmation to avoid overwriting shared history.",
 )
 
 prefix_rule(
-    pattern = "git reset --hard",
+    pattern = ["git", "reset", "--hard"],
     decision = "prompt",
     justification = "Hard reset discards uncommitted changes. Confirm before proceeding.",
 )
 
 prefix_rule(
-    pattern = "rm -rf",
+    pattern = ["rm", "-rf"],
     decision = "prompt",
     justification = "Recursive force delete requires confirmation.",
 )
 
 prefix_rule(
-    pattern = "drop table",
+    pattern = ["drop", "table"],
     decision = "forbidden",
     justification = "DROP TABLE is forbidden. Use migrations for schema changes.",
 )
 
 prefix_rule(
-    pattern = "drop database",
+    pattern = ["drop", "database"],
     decision = "forbidden",
     justification = "DROP DATABASE is forbidden.",
 )
