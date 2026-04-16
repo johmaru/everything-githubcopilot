@@ -1,3 +1,8 @@
+---
+name: product-lens
+description: Pressure-test feature ideas, user journeys, and prioritization decisions before committing to implementation.
+---
+
 # Product Lens — Think Before You Build
 
 ## When to Use

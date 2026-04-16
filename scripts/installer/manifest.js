@@ -54,6 +54,9 @@ function getUserInstallManifest() {
 
 function getProjectInstallManifest() {
   return {
+    managedPaths: [
+      '.agents/skills',
+    ],
     copyOperations: [
       { src: '.github/copilot-instructions.md', dst: '.github/copilot-instructions.md', single: true },
       { src: '.github/instructions', dst: '.github/instructions', recursive: true },

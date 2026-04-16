@@ -1,3 +1,8 @@
+---
+name: browser-qa
+description: Run browser-based smoke, interaction, visual regression, and accessibility checks against live pages before or after deploys.
+---
+
 # Browser QA — Automated Visual Testing & Interaction
 
 ## When to Use

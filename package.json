@@ -70,7 +70,7 @@
   "scripts": {
     "correction:classify": "node scripts/hooks/tool-call-correction.js classify --tool read_file --input-file tests/fixtures/tool-call-correction/classify-read-file.json",
     "correction:eval": "node scripts/hooks/tool-call-correction.js eval",
-    "postinstall": "echo '\n  Everything GitHub Copilot installed.\n  Active customizations live under .github/.\n  Validate with: npm run validate\n  Docs: README.md and docs/migration-status.md\n'",
+    "postinstall": "echo '\n  Everything GitHub Copilot installed.\n  Active customizations live under .github/.\n  Codex CLI compatibility is project-local; see README.md for .codex and .agents/skills setup.\n  This package does not manage ~/.codex/skills.\n  Validate with: npm run validate\n  Docs: README.md and docs/migration-status.md\n'",
     "entry-points:eval": "node scripts/hooks/codebase-entry-points.js eval --cases tests/fixtures/entry-points/eval-cases.json",
     "entry-points:index": "node scripts/hooks/codebase-entry-points.js index",
     "entry-points:query": "node scripts/hooks/codebase-entry-points.js query",

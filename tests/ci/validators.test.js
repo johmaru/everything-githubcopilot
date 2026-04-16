@@ -187,6 +187,60 @@ function writeJson(filePath, value) {
   fs.writeFileSync(filePath, JSON.stringify(value, null, 2));
 }
 
+function writeSkill(filePath, frontmatter, body = '# Skill\n') {
+  fs.mkdirSync(path.dirname(filePath), { recursive: true });
+  fs.writeFileSync(filePath, `---\n${frontmatter.join('\n')}\n---\n\n${body}`);
+}
+
+function writeCodexAgentsDoc(filePath, extraLines = []) {
+  fs.mkdirSync(path.dirname(filePath), { recursive: true });
+  fs.writeFileSync(filePath, [
+    '# Codex CLI guidance',
+    '',
+    'Codex should continue to use the root `AGENTS.md` for project instructions.',
+    'This repository does not ship runtime `.codex/instructions/` or `.codex/prompts/` payloads.',
+    'Skills are discovered from `.agents/skills/`.',
+    ...extraLines,
+    '',
+  ].join('\n'));
+}
+
+function writeCodexCompatibilitySurface(testDir, options = {}) {
+  const {
+    agentsDocExtraLines = [],
+    readme = '# Test\n\n`.codex/` is a compatibility surface.\n',
+    configToml = 'approval_policy = "on-request"\n',
+    createSkillsBridge = false,
+    includeHooks = true,
+    includeRules = true,
+    includeAgents = true,
+  } = options;
+
+  fs.mkdirSync(path.join(testDir, '.codex'), { recursive: true });
+  fs.writeFileSync(path.join(testDir, '.codex', 'config.toml'), configToml);
+  writeCodexAgentsDoc(path.join(testDir, '.codex', 'AGENTS.md'), agentsDocExtraLines);
+
+  if (includeHooks) {
+    fs.writeFileSync(path.join(testDir, '.codex', 'hooks.json'), '{\n  "hooks": {}\n}\n');
+  }
+
+  if (includeRules) {
+    fs.mkdirSync(path.join(testDir, '.codex', 'rules'), { recursive: true });
+    fs.writeFileSync(path.join(testDir, '.codex', 'rules', 'security.rules'), '# security rules\n');
+  }
+
+  if (includeAgents) {
+    fs.mkdirSync(path.join(testDir, '.codex', 'agents'), { recursive: true });
+    fs.writeFileSync(path.join(testDir, '.codex', 'agents', 'explorer.toml'), 'name = "explorer"\n');
+  }
+
+  if (createSkillsBridge) {
+    fs.mkdirSync(path.join(testDir, '.agents', 'skills'), { recursive: true });
+  }
+
+  fs.writeFileSync(path.join(testDir, 'README.md'), readme);
+}
+
 function writeRepoFixture(testDir, relativePath, transform = (source) => source) {
   const sourcePath = path.join(repoRoot, ...relativePath.split('/'));
   const destinationPath = path.join(testDir, ...relativePath.split('/'));
@@ -256,6 +310,7 @@ results.push(test('validate-copilot-customizations passes on the shipped reposit
   const result = runValidator('validate-copilot-customizations');
   assert.strictEqual(result.code, 0, result.stderr);
   assert.ok(result.stdout.includes('Validated Copilot customizations'));
+  assert.ok(result.stdout.includes('skills'));
 }));
 
 results.push(test('shipped docs and instructions document semantic indexer discovery paths', () => {
@@ -305,6 +360,106 @@ results.push(test('validate-copilot-customizations fails on agent without frontm
 
     assert.strictEqual(result.code, 1);
     assert.ok(result.stderr.includes('missing YAML frontmatter'));
+  } finally {
+    cleanupTestDir(testDir);
+  }
+}));
+
+results.push(test('validate-copilot-customizations fails on skill without frontmatter', () => {
+  const testDir = createTestDir();
+  try {
+    writeMinimalRepoFixtures(testDir);
+    fs.mkdirSync(path.join(testDir, '.github', 'skills', 'broken-skill'), { recursive: true });
+    fs.writeFileSync(path.join(testDir, '.github', 'skills', 'broken-skill', 'SKILL.md'), '# no frontmatter\n');
+
+    const result = runValidatorWithOverrides('validate-copilot-customizations', {
+      ROOT: testDir,
+      GITHUB_DIR: path.join(testDir, '.github'),
+      COPILOT_INSTRUCTIONS: path.join(testDir, '.github', 'copilot-instructions.md'),
+      INSTRUCTIONS_DIR: path.join(testDir, '.github', 'instructions'),
+      PROMPTS_DIR: path.join(testDir, '.github', 'prompts'),
+      AGENTS_DIR: path.join(testDir, '.github', 'agents'),
+    });
+
+    assert.strictEqual(result.code, 1);
+    assert.ok(result.stderr.includes('broken-skill/SKILL.md'));
+    assert.ok(result.stderr.includes('missing YAML frontmatter'));
+  } finally {
+    cleanupTestDir(testDir);
+  }
+}));
+
+results.push(test('validate-copilot-customizations fails on skill without description', () => {
+  const testDir = createTestDir();
+  try {
+    writeMinimalRepoFixtures(testDir);
+    writeSkill(path.join(testDir, '.github', 'skills', 'broken-skill', 'SKILL.md'), [
+      'name: broken-skill',
+    ]);
+
+    const result = runValidatorWithOverrides('validate-copilot-customizations', {
+      ROOT: testDir,
+      GITHUB_DIR: path.join(testDir, '.github'),
+      COPILOT_INSTRUCTIONS: path.join(testDir, '.github', 'copilot-instructions.md'),
+      INSTRUCTIONS_DIR: path.join(testDir, '.github', 'instructions'),
+      PROMPTS_DIR: path.join(testDir, '.github', 'prompts'),
+      AGENTS_DIR: path.join(testDir, '.github', 'agents'),
+    });
+
+    assert.strictEqual(result.code, 1);
+    assert.ok(result.stderr.includes('broken-skill/SKILL.md'));
+    assert.ok(result.stderr.includes('description field'));
+  } finally {
+    cleanupTestDir(testDir);
+  }
+}));
+
+results.push(test('validate-copilot-customizations fails on skill without name', () => {
+  const testDir = createTestDir();
+  try {
+    writeMinimalRepoFixtures(testDir);
+    writeSkill(path.join(testDir, '.github', 'skills', 'broken-skill', 'SKILL.md'), [
+      'description: Missing a name field',
+    ]);
+
+    const result = runValidatorWithOverrides('validate-copilot-customizations', {
+      ROOT: testDir,
+      GITHUB_DIR: path.join(testDir, '.github'),
+      COPILOT_INSTRUCTIONS: path.join(testDir, '.github', 'copilot-instructions.md'),
+      INSTRUCTIONS_DIR: path.join(testDir, '.github', 'instructions'),
+      PROMPTS_DIR: path.join(testDir, '.github', 'prompts'),
+      AGENTS_DIR: path.join(testDir, '.github', 'agents'),
+    });
+
+    assert.strictEqual(result.code, 1);
+    assert.ok(result.stderr.includes('broken-skill/SKILL.md'));
+    assert.ok(result.stderr.includes('name field'));
+  } finally {
+    cleanupTestDir(testDir);
+  }
+}));
+
+results.push(test('validate-copilot-customizations accepts skill with block-scalar description', () => {
+  const testDir = createTestDir();
+  try {
+    writeMinimalRepoFixtures(testDir);
+    writeSkill(path.join(testDir, '.github', 'skills', 'valid-skill', 'SKILL.md'), [
+      'name: valid-skill',
+      'description: >-',
+      '  Valid skill description for discovery.',
+    ]);
+
+    const result = runValidatorWithOverrides('validate-copilot-customizations', {
+      ROOT: testDir,
+      GITHUB_DIR: path.join(testDir, '.github'),
+      COPILOT_INSTRUCTIONS: path.join(testDir, '.github', 'copilot-instructions.md'),
+      INSTRUCTIONS_DIR: path.join(testDir, '.github', 'instructions'),
+      PROMPTS_DIR: path.join(testDir, '.github', 'prompts'),
+      AGENTS_DIR: path.join(testDir, '.github', 'agents'),
+    });
+
+    assert.strictEqual(result.code, 0, result.stderr);
+    assert.ok(result.stdout.includes('1 skills'));
   } finally {
     cleanupTestDir(testDir);
   }
@@ -1619,6 +1774,39 @@ results.push(test('package manifest excludes local planning docs from the publis
   assert.strictEqual(isPublishedRepoFile('ARCHITECTURE.md'), false, 'ARCHITECTURE.md should stay out of the published package surface');
 }));
 
+results.push(test('package manifest keeps the shipped Codex runtime surface in the published files surface', () => {
+  assert.strictEqual(isPublishedRepoFile('.codex/AGENTS.md'), true, '.codex/AGENTS.md should stay in the published package surface');
+  assert.strictEqual(isPublishedRepoFile('.codex/config.toml'), true, '.codex/config.toml should stay in the published package surface');
+  assert.strictEqual(isPublishedRepoFile('.codex/hooks.json'), true, '.codex/hooks.json should stay in the published package surface');
+  assert.strictEqual(isPublishedRepoFile('.codex/rules/security.rules'), true, '.codex/rules/security.rules should stay in the published package surface');
+  assert.strictEqual(isPublishedRepoFile('.codex/agents/explorer.toml'), true, '.codex/agents/explorer.toml should stay in the published package surface');
+}));
+
+results.push(test('package manifest keeps every shipped Codex agent registration in the published files surface', () => {
+  const codexAgentsDir = path.join(repoRoot, '.codex', 'agents');
+  const shippedAgentFiles = fs.readdirSync(codexAgentsDir)
+    .filter((entry) => entry.endsWith('.toml'));
+
+  assert.ok(shippedAgentFiles.length > 0, 'expected shipped Codex agent registrations to exist');
+  for (const agentFile of shippedAgentFiles) {
+    assert.strictEqual(
+      isPublishedRepoFile(path.posix.join('.codex', 'agents', agentFile)),
+      true,
+      `${agentFile} should stay in the published package surface`
+    );
+  }
+}));
+
+results.push(test('README variants document the root AGENTS boundary for Codex project instructions', () => {
+  const readmeEn = fs.readFileSync(path.join(repoRoot, 'README.md'), 'utf8');
+  const readmeJa = fs.readFileSync(path.join(repoRoot, 'README.ja.md'), 'utf8');
+  const readmeZh = fs.readFileSync(path.join(repoRoot, 'README.zh-CN.md'), 'utf8');
+
+  assert.ok(readmeEn.includes('Codex continues to read the root `AGENTS.md` for project instructions'), 'README.md should document the root AGENTS boundary for Codex');
+  assert.ok(readmeJa.includes('Codex は project instructions として root の `AGENTS.md` を読み続けます'), 'README.ja.md should document the root AGENTS boundary for Codex');
+  assert.ok(readmeZh.includes('Codex 会继续读取根目录 `AGENTS.md` 作为项目 instructions'), 'README.zh-CN.md should document the root AGENTS boundary for Codex');
+}));
+
 results.push(test('coder agent requires a verification completion gate before completion reporting', () => {
   const coderAgent = fs.readFileSync(
     path.join(__dirname, '..', '..', '.github', 'agents', 'coder.agent.md'),
@@ -1810,10 +1998,11 @@ results.push(test('validate-copilot-customizations detects stale .codex/AGENTS.m
   const testDir = createTestDir();
   try {
     writeMinimalRepoFixtures(testDir);
-    fs.mkdirSync(path.join(testDir, '.codex'), { recursive: true });
-    fs.writeFileSync(path.join(testDir, '.codex', 'config.toml'), 'approval_policy = "on-request"\n');
-    fs.writeFileSync(path.join(testDir, '.codex', 'AGENTS.md'), '# Codex\n\nSkills are loaded from `.agents/skills/`.\n');
-    fs.writeFileSync(path.join(testDir, 'README.md'), '# Test\n\n`.codex/` is a compatibility surface.\n');
+    writeCodexCompatibilitySurface(testDir, {
+      agentsDocExtraLines: [
+        'Skills are loaded from `.agents/skills/`.',
+      ],
+    });
 
     const result = runValidatorWithOverrides('validate-copilot-customizations', {
       ROOT: testDir,
@@ -1833,14 +2022,128 @@ results.push(test('validate-copilot-customizations detects stale .codex/AGENTS.m
   }
 }));
 
-results.push(test('validate-copilot-customizations requires README to document .codex boundary', () => {
+results.push(test('validate-copilot-customizations requires .codex/AGENTS.md to keep the root instruction boundary', () => {
   const testDir = createTestDir();
   try {
     writeMinimalRepoFixtures(testDir);
     fs.mkdirSync(path.join(testDir, '.codex'), { recursive: true });
     fs.writeFileSync(path.join(testDir, '.codex', 'config.toml'), 'approval_policy = "on-request"\n');
     fs.writeFileSync(path.join(testDir, '.codex', 'AGENTS.md'), '# Codex CLI guidance\n');
-    fs.writeFileSync(path.join(testDir, 'README.md'), '# Test\n\nNo codex mention here.\n');
+    fs.writeFileSync(path.join(testDir, 'README.md'), '# Test\n\n`.codex/` is a compatibility surface.\n');
+
+    const result = runValidatorWithOverrides('validate-copilot-customizations', {
+      ROOT: testDir,
+      GITHUB_DIR: path.join(testDir, '.github'),
+      README_PATH: path.join(testDir, 'README.md'),
+      COPILOT_INSTRUCTIONS: path.join(testDir, '.github', 'copilot-instructions.md'),
+      INSTRUCTIONS_DIR: path.join(testDir, '.github', 'instructions'),
+      PROMPTS_DIR: path.join(testDir, '.github', 'prompts'),
+      AGENTS_DIR: path.join(testDir, '.github', 'agents'),
+    });
+
+    assert.strictEqual(result.code, 1, 'should fail when .codex/AGENTS.md drops the Codex boundary guidance');
+    assert.ok(result.stderr.includes('P1-012'), 'should report the Codex contract rule id');
+    assert.ok(result.stderr.includes('.codex/AGENTS.md'), 'should identify the broken Codex guidance file');
+  } finally {
+    cleanupTestDir(testDir);
+  }
+}));
+
+results.push(test('validate-copilot-customizations requires the rest of the Codex runtime surface when .codex exists', () => {
+  const testDir = createTestDir();
+  try {
+    writeMinimalRepoFixtures(testDir);
+    writeCodexCompatibilitySurface(testDir, {
+      createSkillsBridge: true,
+      includeHooks: false,
+    });
+
+    const result = runValidatorWithOverrides('validate-copilot-customizations', {
+      ROOT: testDir,
+      GITHUB_DIR: path.join(testDir, '.github'),
+      README_PATH: path.join(testDir, 'README.md'),
+      COPILOT_INSTRUCTIONS: path.join(testDir, '.github', 'copilot-instructions.md'),
+      INSTRUCTIONS_DIR: path.join(testDir, '.github', 'instructions'),
+      PROMPTS_DIR: path.join(testDir, '.github', 'prompts'),
+      AGENTS_DIR: path.join(testDir, '.github', 'agents'),
+    });
+
+    assert.strictEqual(result.code, 1, 'should fail when .codex omits documented runtime surface files');
+    assert.ok(result.stderr.includes('P1-012'), 'should report the Codex contract rule id');
+    assert.ok(result.stderr.includes('.codex/hooks.json'), 'should identify the missing Codex hooks surface');
+  } finally {
+    cleanupTestDir(testDir);
+  }
+}));
+
+results.push(test('validate-copilot-customizations requires .codex/config.toml to leave model_instructions_file unset', () => {
+  const testDir = createTestDir();
+  try {
+    writeMinimalRepoFixtures(testDir);
+    writeCodexCompatibilitySurface(testDir, {
+      createSkillsBridge: true,
+      configToml: 'approval_policy = "on-request"\nmodel_instructions_file = "/tmp/override.md"\n',
+    });
+
+    const result = runValidatorWithOverrides('validate-copilot-customizations', {
+      ROOT: testDir,
+      GITHUB_DIR: path.join(testDir, '.github'),
+      README_PATH: path.join(testDir, 'README.md'),
+      COPILOT_INSTRUCTIONS: path.join(testDir, '.github', 'copilot-instructions.md'),
+      INSTRUCTIONS_DIR: path.join(testDir, '.github', 'instructions'),
+      PROMPTS_DIR: path.join(testDir, '.github', 'prompts'),
+      AGENTS_DIR: path.join(testDir, '.github', 'agents'),
+    });
+
+    assert.strictEqual(result.code, 1, 'should fail when .codex/config.toml overrides root AGENTS instructions');
+    assert.ok(result.stderr.includes('P1-012'), 'should report the Codex contract rule id');
+    assert.ok(result.stderr.includes('model_instructions_file'), 'should identify the unsupported config override');
+  } finally {
+    cleanupTestDir(testDir);
+  }
+}));
+
+results.push(test('validate-copilot-customizations requires checked-in .agents/skills to mirror .github/skills', () => {
+  const testDir = createTestDir();
+  try {
+    writeMinimalRepoFixtures(testDir);
+    writeSkill(path.join(testDir, '.github', 'skills', 'mirror-skill', 'SKILL.md'), [
+      'name: mirror-skill',
+      'description: mirrored source',
+    ]);
+    writeSkill(path.join(testDir, '.agents', 'skills', 'mirror-skill', 'SKILL.md'), [
+      'name: mirror-skill',
+      'description: mismatched runtime copy',
+    ]);
+
+    const result = runValidatorWithOverrides('validate-copilot-customizations', {
+      ROOT: testDir,
+      GITHUB_DIR: path.join(testDir, '.github'),
+      README_PATH: path.join(testDir, 'README.md'),
+      COPILOT_INSTRUCTIONS: path.join(testDir, '.github', 'copilot-instructions.md'),
+      INSTRUCTIONS_DIR: path.join(testDir, '.github', 'instructions'),
+      PROMPTS_DIR: path.join(testDir, '.github', 'prompts'),
+      AGENTS_DIR: path.join(testDir, '.github', 'agents'),
+      SKILLS_DIR: path.join(testDir, '.github', 'skills'),
+      CODEX_SKILLS_MIRROR_DIR: path.join(testDir, '.agents', 'skills'),
+    });
+
+    assert.strictEqual(result.code, 1, 'should fail when .agents/skills drifts from .github/skills');
+    assert.ok(result.stderr.includes('P1-012'), 'should report the Codex contract rule id');
+    assert.ok(result.stderr.includes('.agents/skills'), 'should identify the checked-in Codex skills mirror drift');
+  } finally {
+    cleanupTestDir(testDir);
+  }
+}));
+
+results.push(test('validate-copilot-customizations requires README to document .codex boundary', () => {
+  const testDir = createTestDir();
+  try {
+    writeMinimalRepoFixtures(testDir);
+    writeCodexCompatibilitySurface(testDir, {
+      createSkillsBridge: true,
+      readme: '# Test\n\nNo codex mention here.\n',
+    });
 
     const result = runValidatorWithOverrides('validate-copilot-customizations', {
       ROOT: testDir,
@@ -1864,10 +2167,9 @@ results.push(test('validate-copilot-customizations passes when .codex is clean a
   const testDir = createTestDir();
   try {
     writeMinimalRepoFixtures(testDir);
-    fs.mkdirSync(path.join(testDir, '.codex'), { recursive: true });
-    fs.writeFileSync(path.join(testDir, '.codex', 'config.toml'), 'approval_policy = "on-request"\n');
-    fs.writeFileSync(path.join(testDir, '.codex', 'AGENTS.md'), '# Codex CLI guidance\n');
-    fs.writeFileSync(path.join(testDir, 'README.md'), '# Test\n\n`.codex/` is a compatibility surface.\n');
+    writeCodexCompatibilitySurface(testDir, {
+      createSkillsBridge: true,
+    });
 
     const result = runValidatorWithOverrides('validate-copilot-customizations', {
       ROOT: testDir,
@@ -1889,11 +2191,13 @@ results.push(test('validate-copilot-customizations allows .agents/skills/ when p
   const testDir = createTestDir();
   try {
     writeMinimalRepoFixtures(testDir);
-    fs.mkdirSync(path.join(testDir, '.codex'), { recursive: true });
-    fs.writeFileSync(path.join(testDir, '.codex', 'config.toml'), 'approval_policy = "on-request"\n');
-    fs.writeFileSync(path.join(testDir, '.codex', 'AGENTS.md'), '# Codex\n\nSkills from `.agents/skills/` directory.\n');
-    fs.writeFileSync(path.join(testDir, 'README.md'), '# Test\n\n`.codex/` compatibility surface.\n');
-    fs.mkdirSync(path.join(testDir, '.agents', 'skills'), { recursive: true });
+    writeCodexCompatibilitySurface(testDir, {
+      agentsDocExtraLines: [
+        'Skills from `.agents/skills/` directory.',
+      ],
+      createSkillsBridge: true,
+      readme: '# Test\n\n`.codex/` compatibility surface.\n',
+    });
 
     const result = runValidatorWithOverrides('validate-copilot-customizations', {
       ROOT: testDir,

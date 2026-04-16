@@ -55,9 +55,91 @@ function normalizeRelativePath(filePath) {
   return filePath.split(path.sep).join('/');
 }
 
-function resolveRelativePath(targetRoot, relativePath) {
+function stripWindowsLongPathPrefix(targetPath) {
+  if (process.platform !== 'win32' || typeof targetPath !== 'string') {
+    return targetPath;
+  }
+
+  return targetPath.replace(/^\\\\\?\\/, '');
+}
+
+function normalizeComparableAbsolutePath(targetPath) {
+  const sanitizedPath = stripWindowsLongPathPrefix(targetPath);
+  const resolvedPath = path.normalize(path.isAbsolute(sanitizedPath) ? sanitizedPath : path.resolve(sanitizedPath));
+  return process.platform === 'win32' ? resolvedPath.toLowerCase() : resolvedPath;
+}
+
+function absolutePathsMatch(leftPath, rightPath) {
+  return normalizeComparableAbsolutePath(leftPath) === normalizeComparableAbsolutePath(rightPath);
+}
+
+function getAllowedManagedRedirectTargets(targetRoot, relativePath) {
+  if (normalizeRelativePath(relativePath) === '.agents/skills') {
+    return [path.join(targetRoot, '.github', 'skills')];
+  }
+
+  return [];
+}
+
+function getLinkTargetPath(targetPath) {
+  try {
+    const rawTarget = stripWindowsLongPathPrefix(fs.readlinkSync(targetPath));
+    return path.isAbsolute(rawTarget)
+      ? path.normalize(rawTarget)
+      : path.resolve(path.dirname(targetPath), rawTarget);
+  } catch {
+    return null;
+  }
+}
+
+function ensureManagedPathUsesCanonicalLocation(targetRoot, targetPath) {
+  const resolvedTargetRoot = path.resolve(targetRoot);
+  const resolvedTargetPath = path.resolve(targetPath);
+  const relativePath = path.relative(resolvedTargetRoot, resolvedTargetPath);
+
+  if (!relativePath || relativePath.startsWith('..') || path.isAbsolute(relativePath)) {
+    return;
+  }
+
+  let currentPath = resolvedTargetRoot;
+  for (const segment of relativePath.split(path.sep).filter(Boolean)) {
+    currentPath = path.join(currentPath, segment);
+
+    if (!fs.existsSync(currentPath)) {
+      continue;
+    }
+
+    const currentRelativePath = normalizeRelativePath(path.relative(resolvedTargetRoot, currentPath));
+    const allowedRedirectTargets = getAllowedManagedRedirectTargets(targetRoot, currentRelativePath);
+    const explicitLinkTarget = getLinkTargetPath(currentPath);
+    if (explicitLinkTarget) {
+      if (absolutePathsMatch(explicitLinkTarget, currentPath)) {
+        continue;
+      }
+
+      if (allowedRedirectTargets.some((allowedTarget) => absolutePathsMatch(explicitLinkTarget, allowedTarget))) {
+        continue;
+      }
+
+      throw new Error(`refusing to access redirected managed path: ${currentPath}`);
+    }
+
+    const realCurrentPath = fs.realpathSync.native(currentPath);
+    if (absolutePathsMatch(realCurrentPath, currentPath)) {
+      continue;
+    }
+
+    if (allowedRedirectTargets.some((allowedTarget) => absolutePathsMatch(realCurrentPath, allowedTarget))) {
+      continue;
+    }
+
+    throw new Error(`refusing to access redirected managed path: ${currentPath}`);
+  }
+}
+
+function resolveRelativePath(targetRoot, relativePath, options = {}) {
   const targetPath = path.join(targetRoot, relativePath);
-  ensurePathInsideTargetRoot(targetRoot, targetPath);
+  ensurePathInsideTargetRoot(targetRoot, targetPath, options);
   return targetPath;
 }
 
@@ -79,6 +161,21 @@ function ensureExistingPathResolvesInsideTargetRoot(targetRoot, targetPath) {
   }
 }
 
+function getRealPath(targetPath) {
+  return fs.realpathSync.native(targetPath);
+}
+
+function pathsReferToSameLocation(leftPath, rightPath) {
+  const resolvedLeftPath = getRealPath(leftPath);
+  const resolvedRightPath = getRealPath(rightPath);
+
+  if (process.platform === 'win32') {
+    return resolvedLeftPath.toLowerCase() === resolvedRightPath.toLowerCase();
+  }
+
+  return resolvedLeftPath === resolvedRightPath;
+}
+
 function addBackupFile(backupFiles, relativePath, stateRef) {
   if (backupFiles.has(relativePath)) {
     return;
@@ -91,7 +188,40 @@ function addBackupFile(backupFiles, relativePath, stateRef) {
 }
 
 function addCopiedFile(copiedFiles, relativePath) {
+  if (copiedFiles.includes(relativePath)) {
+    return;
+  }
+
   copiedFiles.push(relativePath);
+}
+
+function addPreservedDirectory(preservedDirectories, relativePath, stateRef = null) {
+  if (preservedDirectories.includes(relativePath)) {
+    return;
+  }
+
+  preservedDirectories.push(relativePath);
+  if (stateRef) {
+    stateRef.preservedDirectories = [...preservedDirectories];
+  }
+}
+
+function collectPreexistingDirectories(targetRoot, relativePaths) {
+  const existingDirectories = new Set();
+
+  for (const relativePath of relativePaths) {
+    const targetPath = path.join(targetRoot, relativePath);
+    if (!fs.existsSync(targetPath)) {
+      continue;
+    }
+
+    const stats = fs.lstatSync(targetPath);
+    if (stats.isDirectory() && !stats.isSymbolicLink()) {
+      existingDirectories.add(normalizeRelativePath(relativePath));
+    }
+  }
+
+  return existingDirectories;
 }
 
 function ensureBackupOfFile(targetRoot, backupRoot, targetPath, backupFiles, stateRef = null) {
@@ -99,7 +229,7 @@ function ensureBackupOfFile(targetRoot, backupRoot, targetPath, backupFiles, sta
     return;
   }
 
-  ensureExistingPathResolvesInsideTargetRoot(targetRoot, targetPath);
+  ensurePathInsideTargetRoot(targetRoot, targetPath);
 
   const relativePath = normalizeRelativePath(path.relative(targetRoot, targetPath));
   if (backupFiles.has(relativePath)) {
@@ -157,7 +287,7 @@ function pruneEmptyParents(startPath, stopPath) {
   }
 }
 
-function ensurePathInsideTargetRoot(targetRoot, targetPath) {
+function ensurePathInsideTargetRoot(targetRoot, targetPath, options = {}) {
   const resolvedTargetRoot = path.resolve(targetRoot);
   const resolvedTargetPath = path.resolve(targetPath);
   const realTargetRoot = fs.realpathSync.native(targetRoot);
@@ -178,6 +308,10 @@ function ensurePathInsideTargetRoot(targetRoot, targetPath) {
   const realProbePath = fs.realpathSync.native(probePath);
   if (realProbePath !== realTargetRoot && !realProbePath.startsWith(`${realTargetRoot}${path.sep}`)) {
     throw new Error(`refusing to write outside the target root: ${targetPath}`);
+  }
+
+  if (!options.allowManagedRedirects) {
+    ensureManagedPathUsesCanonicalLocation(targetRoot, resolvedTargetPath);
   }
 }
 
@@ -297,6 +431,12 @@ function copyProjectPayload(repoRoot, targetRoot, backupRoot, stateRef = null) {
 function ensureDependencyPackage(targetRoot) {
   const packageJsonPath = path.join(targetRoot, 'package.json');
 
+  if (getLinkTargetPath(packageJsonPath)) {
+    throw new Error(`refusing to create package.json through redirected managed path: ${packageJsonPath}`);
+  }
+
+  ensurePathInsideTargetRoot(targetRoot, packageJsonPath);
+
   if (fs.existsSync(packageJsonPath)) {
     return false;
   }
@@ -317,6 +457,7 @@ function readPackageJson(targetRoot) {
   }
 
   try {
+    ensurePathInsideTargetRoot(targetRoot, packageJsonPath);
     const rawPackageJson = fs.readFileSync(packageJsonPath, 'utf8').replace(/^\uFEFF/, '');
     return {
       exists: true,
@@ -452,7 +593,14 @@ function collectDependencyState(targetRoot, backupRoot, backupFiles) {
 
 function getAllowedManagedPrefixes() {
   const manifest = getProjectInstallManifest();
-  return manifest.copyOperations.map((operation) => normalizeRelativePath(operation.dst));
+  const configuredManagedPaths = Array.isArray(manifest.managedPaths)
+    ? manifest.managedPaths.map((managedPath) => normalizeRelativePath(managedPath))
+    : [];
+
+  return [
+    ...manifest.copyOperations.map((operation) => normalizeRelativePath(operation.dst)),
+    ...configuredManagedPaths,
+  ];
 }
 
 function isManagedInstallPath(relativePath) {
@@ -470,8 +618,30 @@ function isManagedInstallPath(relativePath) {
   return false;
 }
 
+function isManagedInstallPathOrAncestor(relativePath) {
+  const normalizedPath = normalizeRelativePath(relativePath);
+
+  if (isManagedInstallPath(normalizedPath)) {
+    return true;
+  }
+
+  return getAllowedManagedPrefixes().some((destination) => destination.startsWith(`${normalizedPath}/`));
+}
+
+function isLegacyInstallState(state) {
+  return !Number.isInteger(state.version) || state.version < 2;
+}
+
 function validateInstallState(state) {
   if (!state || !Array.isArray(state.copiedFiles) || !Array.isArray(state.backupFiles)) {
+    return false;
+  }
+
+  if (state.version !== undefined && (!Number.isInteger(state.version) || state.version < 1)) {
+    return false;
+  }
+
+  if (state.preservedDirectories !== undefined && !Array.isArray(state.preservedDirectories)) {
     return false;
   }
 
@@ -496,8 +666,16 @@ function validateInstallState(state) {
     }
   }
 
-  return [...state.copiedFiles, ...state.backupFiles].every((relativePath) => {
+  const managedPathsAreValid = [...state.copiedFiles, ...state.backupFiles].every((relativePath) => {
     return typeof relativePath === 'string' && relativePath.length > 0 && isManagedInstallPath(relativePath);
+  });
+
+  if (!managedPathsAreValid) {
+    return false;
+  }
+
+  return (state.preservedDirectories || []).every((relativePath) => {
+    return typeof relativePath === 'string' && relativePath.length > 0 && isManagedInstallPathOrAncestor(relativePath);
   });
 }
 
@@ -525,10 +703,39 @@ function installDependencies(targetRoot) {
   });
 }
 
+function ensureCanonicalDependencyArtifact(targetRoot, filePath) {
+  if (getLinkTargetPath(filePath)) {
+    throw new Error(`refusing to access redirected managed path: ${filePath}`);
+  }
+
+  if (fs.existsSync(filePath)) {
+    ensurePathInsideTargetRoot(targetRoot, filePath);
+  }
+}
+
+function validateDependencyArtifactsForUninstall(targetRoot, dependencyState) {
+  if (!dependencyState) {
+    return;
+  }
+
+  ensureCanonicalDependencyArtifact(targetRoot, path.join(targetRoot, 'package.json'));
+
+  const lockfileNames = new Set([
+    ...(dependencyState.preexistingLockfiles || []),
+    ...(dependencyState.generatedLockfiles || []),
+  ]);
+
+  for (const lockfileName of lockfileNames) {
+    ensureCanonicalDependencyArtifact(targetRoot, path.join(targetRoot, lockfileName));
+  }
+}
+
 function uninstallDependencies(targetRoot, dependencyState, warnings) {
   if (!dependencyState || dependencyState.skippedDependencyInstall || !dependencyState.hadPackageJson) {
     return null;
   }
+
+  validateDependencyArtifactsForUninstall(targetRoot, dependencyState);
 
   const plan = getDependencyUninstallPlan(targetRoot, dependencyState.packageManager);
 
@@ -549,9 +756,9 @@ function uninstallDependencies(targetRoot, dependencyState, warnings) {
   return null;
 }
 
-function restoreFileFromBackup(targetRoot, backupRoot, relativePath) {
+function restoreFileFromBackup(targetRoot, backupRoot, relativePath, options = {}) {
   const backupPath = getBackupPath(targetRoot, backupRoot, relativePath);
-  const targetPath = resolveRelativePath(targetRoot, relativePath);
+  const targetPath = resolveRelativePath(targetRoot, relativePath, options);
   if (!fs.existsSync(backupPath)) {
     return false;
   }
@@ -561,8 +768,8 @@ function restoreFileFromBackup(targetRoot, backupRoot, relativePath) {
   return true;
 }
 
-function removeManagedFile(targetRoot, relativePath) {
-  const targetPath = resolveRelativePath(targetRoot, relativePath);
+function removeManagedFile(targetRoot, relativePath, options = {}) {
+  const targetPath = resolveRelativePath(targetRoot, relativePath, options);
   if (!fs.existsSync(targetPath)) {
     return;
   }
@@ -571,7 +778,7 @@ function removeManagedFile(targetRoot, relativePath) {
   pruneEmptyParents(path.dirname(targetPath), targetRoot);
 }
 
-function restoreDependencyArtifacts(targetRoot, backupRoot, dependencyState) {
+function restoreDependencyArtifacts(targetRoot, backupRoot, dependencyState, options = {}) {
   if (!dependencyState) {
     return [];
   }
@@ -579,34 +786,42 @@ function restoreDependencyArtifacts(targetRoot, backupRoot, dependencyState) {
   const restoreErrors = [];
 
   for (const lockfileName of dependencyState.generatedLockfiles || []) {
-    removeManagedFile(targetRoot, lockfileName);
+    removeManagedFile(targetRoot, lockfileName, options);
   }
 
   if (dependencyState.hadPackageJson) {
-    if (!restoreFileFromBackup(targetRoot, backupRoot, 'package.json')) {
+    if (!restoreFileFromBackup(targetRoot, backupRoot, 'package.json', options)) {
       restoreErrors.push('package.json');
     }
   } else if (dependencyState.createdPackageJson) {
-    removeManagedFile(targetRoot, 'package.json');
+    removeManagedFile(targetRoot, 'package.json', options);
   }
 
   for (const lockfileName of dependencyState.preexistingLockfiles || []) {
-    if (!restoreFileFromBackup(targetRoot, backupRoot, lockfileName)) {
+    if (!restoreFileFromBackup(targetRoot, backupRoot, lockfileName, options)) {
       restoreErrors.push(lockfileName);
     }
   }
 
   if (dependencyState.createdNodeModules) {
-    removeManagedFile(targetRoot, 'node_modules');
+    removeManagedFile(targetRoot, 'node_modules', options);
   }
 
   return restoreErrors;
+}
+
+function restorePreservedDirectories(targetRoot, preservedDirectories, options = {}) {
+  for (const relativePath of [...preservedDirectories].sort((left, right) => left.length - right.length)) {
+    const targetPath = resolveRelativePath(targetRoot, relativePath, options);
+    fs.mkdirSync(targetPath, { recursive: true });
+  }
 }
 
 function restoreProjectFromState(targetRoot, state, options = {}) {
   const { stateFile, backupRoot } = getProjectInstallPaths(targetRoot);
   const warnings = [];
   const restoreErrors = [];
+  const restorePathOptions = { allowManagedRedirects: options.allowManagedRedirects === true };
   const dependencyRemovalError = uninstallDependencies(targetRoot, state.dependencyState, warnings);
   if (dependencyRemovalError) {
     restoreErrors.push(dependencyRemovalError);
@@ -614,23 +829,26 @@ function restoreProjectFromState(targetRoot, state, options = {}) {
 
   const backupFiles = new Set(state.backupFiles || []);
   const copiedFiles = [...(state.copiedFiles || [])].sort((left, right) => right.length - left.length);
+  const preservedDirectories = state.preservedDirectories || [];
 
   for (const relativePath of copiedFiles) {
     if (backupFiles.has(relativePath)) {
-      if (!restoreFileFromBackup(targetRoot, backupRoot, relativePath)) {
+      if (!restoreFileFromBackup(targetRoot, backupRoot, relativePath, restorePathOptions)) {
         restoreErrors.push(relativePath);
       }
       continue;
     }
 
-    removeManagedFile(targetRoot, relativePath);
+    removeManagedFile(targetRoot, relativePath, restorePathOptions);
   }
 
-  restoreErrors.push(...restoreDependencyArtifacts(targetRoot, backupRoot, state.dependencyState));
+  restoreErrors.push(...restoreDependencyArtifacts(targetRoot, backupRoot, state.dependencyState, restorePathOptions));
 
   if (restoreErrors.length > 0) {
     throw new Error(`Missing installer backups for: ${restoreErrors.join(', ')}`);
   }
+
+  restorePreservedDirectories(targetRoot, preservedDirectories, restorePathOptions);
 
   if (!options.preserveArtifacts) {
     fs.rmSync(backupRoot, { recursive: true, force: true });
@@ -640,46 +858,141 @@ function restoreProjectFromState(targetRoot, state, options = {}) {
   return warnings;
 }
 
-function ensureSkillsJunction(targetRoot) {
+function ensureSkillsJunction(targetRoot, backupRoot, stateRef = null, preexistingDirectories = new Set()) {
   const agentsDir = path.join(targetRoot, '.agents');
   const junctionPath = path.join(agentsDir, 'skills');
   const skillsSource = path.join(targetRoot, '.github', 'skills');
+  const copiedFiles = stateRef ? stateRef.copiedFiles : [];
+  const backupFiles = new Set(stateRef ? stateRef.backupFiles : []);
+  const bridgeRelativePath = ' .agents/skills'.trim();
+  const preservedDirectories = stateRef ? (stateRef.preservedDirectories || []) : [];
+  const warnings = [];
 
   if (!fs.existsSync(skillsSource)) {
-    return;
+    return { warnings };
   }
+
+  const liveLinkTarget = getLinkTargetPath(junctionPath);
+  if (liveLinkTarget) {
+    ensureExistingPathResolvesInsideTargetRoot(targetRoot, junctionPath);
+    if (!absolutePathsMatch(liveLinkTarget, skillsSource)) {
+      throw new Error('Existing .agents/skills link points to an unexpected target. Remove it and rerun project setup.');
+    }
+
+    if (preexistingDirectories.has('.github')) {
+      addPreservedDirectory(preservedDirectories, '.github', stateRef);
+    }
+    if (preexistingDirectories.has('.github/skills')) {
+      addPreservedDirectory(preservedDirectories, '.github/skills', stateRef);
+    }
+
+    return { warnings };
+  }
+
+  ensurePathInsideTargetRoot(targetRoot, agentsDir);
+  ensurePathInsideTargetRoot(targetRoot, junctionPath);
 
   fs.mkdirSync(agentsDir, { recursive: true });
 
-  if (fs.existsSync(junctionPath)) {
-    const stat = fs.lstatSync(junctionPath);
-    if (stat.isSymbolicLink() || stat.isDirectory()) {
-      return;
+  let junctionStats = null;
+  try {
+    junctionStats = fs.lstatSync(junctionPath);
+  } catch {
+    junctionStats = null;
+  }
+
+  let hadExistingDirectory = false;
+  if (junctionStats) {
+    if (junctionStats.isSymbolicLink()) {
+      if (fs.existsSync(junctionPath)) {
+        ensureExistingPathResolvesInsideTargetRoot(targetRoot, junctionPath);
+        if (!pathsReferToSameLocation(junctionPath, skillsSource)) {
+          throw new Error('Existing .agents/skills link points to an unexpected target. Remove it and rerun project setup.');
+        }
+
+        return { warnings };
+      }
+
+      throw new Error('Cannot replace a broken .agents/skills symlink automatically. Remove it and rerun project setup.');
+    } else if (junctionStats.isDirectory()) {
+      hadExistingDirectory = true;
+    } else {
+      ensureBackupOfFile(targetRoot, backupRoot, junctionPath, backupFiles, stateRef);
+      fs.rmSync(junctionPath, { force: true });
+      addCopiedFile(copiedFiles, bridgeRelativePath);
+      junctionStats = null;
     }
   }
 
-  try {
-    fs.symlinkSync(skillsSource, junctionPath, 'junction');
-  } catch {
-    // junction creation may fail on some systems; not fatal
+  if (!junctionStats) {
+    try {
+      fs.symlinkSync(skillsSource, junctionPath, 'junction');
+      addCopiedFile(copiedFiles, bridgeRelativePath);
+      if (preexistingDirectories.has('.agents')) {
+        addPreservedDirectory(preservedDirectories, '.agents', stateRef);
+      }
+      return {
+        warnings,
+        backupFiles: [...backupFiles],
+      };
+    } catch {
+      warnings.push('Warning: .agents/skills junction could not be created - installed a copied skills bridge instead.');
+    }
   }
+
+  copyRecursive(skillsSource, junctionPath, {
+    targetRoot,
+    backupRoot,
+    backupFiles,
+    copiedFiles,
+    stateRef,
+  });
+
+  if (!hadExistingDirectory) {
+    addCopiedFile(copiedFiles, bridgeRelativePath);
+  }
+
+  if (preexistingDirectories.has('.agents')) {
+    addPreservedDirectory(preservedDirectories, '.agents', stateRef);
+  }
+  if (preexistingDirectories.has('.agents/skills')) {
+    addPreservedDirectory(preservedDirectories, '.agents/skills', stateRef);
+  }
+
+  if (stateRef) {
+    stateRef.backupFiles = [...backupFiles];
+  }
+
+  return {
+    warnings,
+    backupFiles: [...backupFiles],
+  };
 }
 
 function installProject(targetRoot) {
   const repoRoot = path.join(__dirname, '..', '..');
   const { stateFile, backupRoot } = getProjectInstallPaths(targetRoot);
+  const preexistingDirectories = collectPreexistingDirectories(targetRoot, ['.github', '.github/skills', '.agents', '.agents/skills']);
 
   if (fs.existsSync(stateFile)) {
     throw new Error('Existing project installer state found. Use reinstall or uninstall first.');
   }
 
   const transientState = {
-    version: 1,
+    version: 2,
     installedAt: new Date().toISOString(),
     copiedFiles: [],
     backupFiles: [],
+    preservedDirectories: [],
     dependencyState: null,
   };
+
+  if (preexistingDirectories.has('.github')) {
+    addPreservedDirectory(transientState.preservedDirectories, '.github', transientState);
+  }
+  if (preexistingDirectories.has('.github/skills')) {
+    addPreservedDirectory(transientState.preservedDirectories, '.github/skills', transientState);
+  }
 
   try {
     const dependencyPlan = getDependencyInstallPlan(targetRoot);
@@ -688,8 +1001,11 @@ function installProject(targetRoot) {
     }
 
     const payload = copyProjectPayload(repoRoot, targetRoot, backupRoot, transientState);
+    const skillsBridge = ensureSkillsJunction(targetRoot, backupRoot, transientState, preexistingDirectories);
 
-    ensureSkillsJunction(targetRoot);
+    if (skillsBridge.backupFiles) {
+      transientState.backupFiles = skillsBridge.backupFiles;
+    }
 
     const backupFiles = new Set(transientState.backupFiles);
     const dependencyState = collectDependencyState(targetRoot, backupRoot, backupFiles);
@@ -706,6 +1022,10 @@ function installProject(targetRoot) {
     saveInstallState(stateFile, transientState);
 
     for (const warning of payload.warnings) {
+      console.log(warning);
+    }
+
+    for (const warning of skillsBridge.warnings || []) {
       console.log(warning);
     }
 
@@ -736,7 +1056,10 @@ function uninstallProject(targetRoot) {
     throw new Error('Installer state file is invalid or references unmanaged paths. Refusing to uninstall.');
   }
 
-  const warnings = restoreProjectFromState(targetRoot, state, { preserveArtifacts: false });
+  const warnings = restoreProjectFromState(targetRoot, state, {
+    preserveArtifacts: false,
+    allowManagedRedirects: isLegacyInstallState(state),
+  });
   for (const warning of warnings) {
     console.log(warning);
   }

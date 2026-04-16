@@ -1,3 +1,8 @@
+---
+name: benchmark
+description: Measure browser, API, and build performance baselines and compare regressions before or after changes.
+---
+
 # Benchmark — Performance Baseline & Regression Detection
 
 ## When to Use

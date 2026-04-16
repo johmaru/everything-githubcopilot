@@ -15,6 +15,8 @@ const COPILOT_INSTRUCTIONS = path.join(GITHUB_DIR, 'copilot-instructions.md');
 const INSTRUCTIONS_DIR = path.join(GITHUB_DIR, 'instructions');
 const PROMPTS_DIR = path.join(GITHUB_DIR, 'prompts');
 const AGENTS_DIR = path.join(GITHUB_DIR, 'agents');
+const SKILLS_DIR = path.join(GITHUB_DIR, 'skills');
+const CODEX_SKILLS_MIRROR_DIR = path.join(ROOT, '.agents', 'skills');
 const COMMON_AGENTS_INSTRUCTIONS = path.join(INSTRUCTIONS_DIR, 'common-agents.instructions.md');
 const COMMON_DEVELOPMENT_WORKFLOW = path.join(INSTRUCTIONS_DIR, 'common-development-workflow.instructions.md');
 const KNOWLEDGE_AUDIT_PROMPT = path.join(PROMPTS_DIR, 'knowledge-audit.prompt.md');
@@ -196,6 +198,25 @@ function validateInstructions(files, errors) {
     }
     if (!frontmatter.applyTo) {
       errors.push(`ERROR: ${file} is missing an applyTo field`);
+    }
+  }
+}
+
+function validateSkills(files, errors) {
+  for (const filePath of files) {
+    const content = readUtf8(filePath);
+    const frontmatter = extractFrontmatter(content);
+    const file = relative(filePath);
+
+    if (!frontmatter) {
+      errors.push(`ERROR: ${file} is missing YAML frontmatter`);
+      continue;
+    }
+    if (!frontmatter.name) {
+      errors.push(`ERROR: ${file} is missing a name field`);
+    }
+    if (!frontmatter.description) {
+      errors.push(`ERROR: ${file} is missing a description field`);
     }
   }
 }
@@ -670,23 +691,77 @@ function validatePrompts(files, customAgentNames, errors) {
   }
 }
 
+function validateCodexSkillsMirror(errors) {
+  if (!fs.existsSync(CODEX_SKILLS_MIRROR_DIR)) {
+    return;
+  }
+
+  const sourceFiles = collectFiles(SKILLS_DIR, 'SKILL.md');
+  const mirrorFiles = collectFiles(CODEX_SKILLS_MIRROR_DIR, 'SKILL.md');
+  const toRootRelativePath = (rootDir, filePath) => path.relative(rootDir, filePath).split(path.sep).join('/');
+  const sourceByRelativePath = new Map(sourceFiles.map((filePath) => [toRootRelativePath(SKILLS_DIR, filePath), filePath]));
+  const mirrorByRelativePath = new Map(mirrorFiles.map((filePath) => [toRootRelativePath(CODEX_SKILLS_MIRROR_DIR, filePath), filePath]));
+
+  for (const relativePath of sourceByRelativePath.keys()) {
+    if (!mirrorByRelativePath.has(relativePath)) {
+      errors.push(`ERROR: P1-012: .agents/skills is missing mirrored file '${relativePath}' from .github/skills`);
+      return;
+    }
+  }
+
+  for (const relativePath of mirrorByRelativePath.keys()) {
+    if (!sourceByRelativePath.has(relativePath)) {
+      errors.push(`ERROR: P1-012: .agents/skills contains extra mirrored file '${relativePath}' that is not present in .github/skills`);
+      return;
+    }
+  }
+
+  for (const [relativePath, sourceFilePath] of sourceByRelativePath.entries()) {
+    const mirrorFilePath = mirrorByRelativePath.get(relativePath);
+    if (readUtf8(sourceFilePath) !== readUtf8(mirrorFilePath)) {
+      errors.push(`ERROR: P1-012: .agents/skills file '${relativePath}' must mirror the content shipped in .github/skills`);
+      return;
+    }
+  }
+}
+
 function validateCodexContracts(errors) {
   const codexDir = path.join(ROOT, '.codex');
   const codexAgentsFile = path.join(codexDir, 'AGENTS.md');
+  const codexAgentsDir = path.join(codexDir, 'agents');
   const codexConfig = path.join(codexDir, 'config.toml');
+  const codexHooks = path.join(codexDir, 'hooks.json');
+  const codexRules = path.join(codexDir, 'rules', 'security.rules');
 
   if (!fs.existsSync(codexDir)) {
     return;
   }
 
+  validateCodexSkillsMirror(errors);
+
   const requiredFiles = [
     { filePath: codexAgentsFile, label: '.codex/AGENTS.md' },
+    { filePath: codexAgentsDir, label: '.codex/agents/' },
     { filePath: codexConfig, label: '.codex/config.toml' },
+    { filePath: codexHooks, label: '.codex/hooks.json' },
+    { filePath: codexRules, label: '.codex/rules/security.rules' },
   ];
 
   for (const { filePath, label } of requiredFiles) {
     if (!fs.existsSync(filePath)) {
       errors.push(`ERROR: P1-012: ${label} is required when .codex/ compatibility surface exists`);
+    }
+  }
+
+  if (fs.existsSync(codexConfig)) {
+    const configContent = readUtf8(codexConfig);
+    const uncommentedConfigLines = configContent
+      .split(/\r?\n/u)
+      .map((line) => line.trim())
+      .filter((line) => line.length > 0 && !line.startsWith('#'));
+
+    if (uncommentedConfigLines.some((line) => /^model_instructions_file\s*=/.test(line))) {
+      errors.push('ERROR: P1-012: .codex/config.toml must leave model_instructions_file unset so the root AGENTS.md remains active');
     }
   }
 
@@ -703,6 +778,19 @@ function validateCodexContracts(errors) {
         errors.push(`ERROR: P1-012: .codex/AGENTS.md references non-existent path '${label}'`);
       }
     }
+
+    validateAnchoredContract(
+      codexAgentsFile,
+      errors,
+      'P1-012',
+      'must keep the root instruction boundary and unsupported Codex runtime surfaces explicit',
+      [
+        ['codexshouldcontinuetousetherootagents.mdforprojectinstructions', 'projectinstructionscomefromtherootagents.md'],
+        ['.agents/skills/'],
+        ['.codex/instructions/'],
+        ['.codex/prompts/'],
+      ]
+    );
   }
 
   const readmeContent = fs.existsSync(README_PATH) ? readUtf8(README_PATH) : '';
@@ -721,8 +809,10 @@ function main() {
   const instructionFiles = collectFiles(INSTRUCTIONS_DIR, '.instructions.md');
   const promptFiles = collectFiles(PROMPTS_DIR, '.prompt.md');
   const agentFiles = collectFiles(AGENTS_DIR, '.agent.md');
+  const skillFiles = collectFiles(SKILLS_DIR, 'SKILL.md');
 
   validateInstructions(instructionFiles, errors);
+  validateSkills(skillFiles, errors);
   const customAgentNames = validateAgents(agentFiles, errors, warnings);
   validatePrompts(promptFiles, customAgentNames, errors);
   validateReviewRoutingContracts(errors);
@@ -741,7 +831,7 @@ function main() {
   }
 
   console.log(
-    `Validated Copilot customizations: ${instructionFiles.length} instructions, ${promptFiles.length} prompts, ${agentFiles.length} agents`
+    `Validated Copilot customizations: ${instructionFiles.length} instructions, ${promptFiles.length} prompts, ${agentFiles.length} agents, ${skillFiles.length} skills`
   );
 }
 

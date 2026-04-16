@@ -1,3 +1,8 @@
+---
+name: design-system
+description: Generate or audit design systems, tokens, and visual consistency issues for product UIs.
+---
+
 # Design System — Generate & Audit Visual Systems
 
 ## When to Use

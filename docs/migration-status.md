@@ -8,10 +8,11 @@ This document tracks the current state of the repository after migration from th
 
 Legacy ECC directories and files have been removed:
 
-- Deleted root directories: `.claude`, `.cursor`, `.kiro`, `.agents`, `.claude-plugin`, `agents`, `commands`, `rules`, `skills`, `hooks`, `contexts`, `ecc2`, `manifests`, `plugins`, `mcp-configs`, `examples`
+- Deleted legacy root directories: `.claude`, `.cursor`, `.kiro`, `.claude-plugin`, `agents`, `commands`, `rules`, `skills`, `hooks`, `contexts`, `ecc2`, `manifests`, `plugins`, `mcp-configs`, `examples`
 - Deleted root files: `CLAUDE.md`, `install.ps1`, `install.sh`, `VERSION`, `.env.example`, `SPONSORING.md`, `SPONSORS.md`
 - Deleted legacy CI validators and scripts (21 JS files, 5 directories)
 - Deleted legacy test directories and files
+- The current `.agents/skills/` path is a new Codex compatibility bridge, not a restored legacy authoring surface
 
 ### Active Copilot structure
 
@@ -36,7 +37,7 @@ planner, coder, researcher, supporter
 
 ### Validation and CI
 
-- `scripts/ci/validate-copilot-customizations.js` validates `.github` instructions, prompts, and agents
+- `scripts/ci/validate-copilot-customizations.js` validates `.github` instructions, prompts, agents, and skills
 - `scripts/ci/validate-github-hooks.js` validates deterministic hook files
 - `scripts/ci/validate-no-personal-paths.js` checks for hardcoded personal paths
 - `npm test` runs all three validators
@@ -55,9 +56,10 @@ planner, coder, researcher, supporter
 ### Project-level installer
 
 - `scripts/installer/project-setup.js` is the shared implementation behind `scripts/setup-project.ps1` and `scripts/setup-project.sh`
-- Project setup copies `.github/`, `.github/workflows/`, `AGENTS.md`, `schemas/`, `scripts/ci/`, `scripts/hooks/`, `tests/fixtures/`, and `rust/semantic-indexer/`
+- Project setup copies `.github/`, `.github/workflows/`, `AGENTS.md`, `.codex/`, `schemas/`, `scripts/ci/`, `scripts/hooks/`, `tests/fixtures/`, and `rust/semantic-indexer/`
 - Existing `.vscode/settings.json` files are preserved with a warning; missing ones are seeded from the shipped workspace baseline
 - Dependency bootstrap follows the target project's package manager when it can detect one, and falls back to `npm` otherwise
+- Project setup installs the project-local `.agents/skills/` bridge for Codex skill discovery, using a junction when available and a copied fallback when junction creation fails
 
 ### Package identity
 
@@ -66,14 +68,16 @@ planner, coder, researcher, supporter
 
 ### Codex CLI compatibility surface
 
+- Root `AGENTS.md` — Codex project instruction source; `.codex/AGENTS.md` is compatibility guidance, not the source-of-truth instruction file
 - `.codex/config.toml` — runtime config with 24 agents, MCP servers, profiles, `codex_hooks = true`
 - `.codex/agents/` — 24 TOML agent definitions (4 core + 17 specialist + 3 legacy)
 - `.codex/hooks.json` — Codex-compatible hooks (SessionStart, PreToolUse, PostToolUse, Stop)
-- `.codex/rules/security.rules` — Starlark execution policy (config protection, destructive command guards)
-- `.codex/AGENTS.md` — Codex-specific guidance with hooks, rules, and agent documentation
-- `.agents/skills/` — junction to `.github/skills/` for Codex skill auto-discovery
+- `.codex/rules/security.rules` — Starlark execution policy carrying the Codex-facing enforcement subset; this repository does not ship runtime `.codex/instructions/`
+- `.codex/AGENTS.md` — Codex compatibility notes for hooks, rules, and agents
+- `.agents/skills/` — project-local bridge from `.github/skills/` for Codex skill auto-discovery; setup creates a junction when possible and a copied fallback otherwise
+- `.github/prompts/` remains the canonical workflow authoring surface; this repository does not ship runtime `.codex/prompts/`
 - `scripts/hooks/codex-pre-tool-use.js` — PreToolUse hook blocking `--no-verify`
-- Project setup (`scripts/installer/project-setup.js`) creates the `.agents/skills` junction
+- Project setup (`scripts/installer/project-setup.js`) copies `.codex/` into target projects and installs the `.agents/skills/` bridge
 
 ### Documentation
 

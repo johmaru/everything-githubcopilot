@@ -57,7 +57,8 @@ These encode the techniques that raised ForgeCode's Terminal-Bench 2.0 score fro
 
 Use `.github` as the source of truth.
 
-- `.codex/` and `.opencode/` are maintained compatibility surfaces. They mirror `.github/` guidance for Codex CLI and OpenCode respectively. Project setup distributes `.codex/` into target projects.
+- `.codex/` and `.opencode/` are maintained compatibility surfaces. They adapt `.github/` guidance for Codex CLI and OpenCode respectively.
+- For Codex, project instructions remain rooted in `AGENTS.md`; `.codex/` carries config, agent registrations, hooks, and rules, Codex expects skills at `.agents/skills/`, and project setup creates that bridge from `.github/skills/`. Project setup distributes these Codex compatibility assets into target projects.
 - Do not add new authoritative guidance outside `.github/` unless it explicitly targets a compatibility surface (e.g. `.codex/`, `.opencode/`).
 - Do not make critical behavior depend on semantic skill loading alone. Important rules must be always-on or `applyTo`-scoped.
 - Keep instructions terse and self-contained. Split long guidance into smaller files instead of growing this file.

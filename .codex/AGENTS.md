@@ -1,6 +1,7 @@
 # ECC for Codex CLI
 
-This supplements the root `AGENTS.md` with Codex-specific guidance.
+This file documents the bundled `.codex/` compatibility assets.
+Codex should continue to use the root `AGENTS.md` for project instructions.
 
 ## Model Recommendations
 
@@ -11,9 +12,17 @@ This supplements the root `AGENTS.md` with Codex-specific guidance.
 | Debugging, refactoring            | GPT 5.4           |
 | Security review                   | GPT 5.4           |
 
+## Customization Boundary
+
+- Project instructions come from the root `AGENTS.md`
+- Codex expects skills at `.agents/skills/`, and project setup creates that bridge from `.github/skills/`
+- `.codex/` carries config, agent registrations, hooks, and rules
+- This repository does not ship runtime `.codex/instructions/`, `.codex/prompts/`, or `~/.codex/skills/` payloads
+
 ## Skills Discovery
 
-Skills are auto-discovered from `.agents/skills/` (a junction to `.github/skills/`).
+Codex discovers skills from `.agents/skills/`.
+Project setup creates that bridge from `.github/skills/`.
 Each skill contains a `SKILL.md` with name/description frontmatter.
 
 - Invoke explicitly via `$skill-name`
@@ -122,7 +131,8 @@ supporter → researcher (deep investigation)
 | Hooks        | 8+ event types, all tools | 4 events, Bash-only for Pre/PostToolUse         |
 | Context file | copilot-instructions.md   | AGENTS.md                                       |
 | Skills       | Plugin-based discovery    | `.agents/skills/` auto-discovery                |
-| Instructions | `.github/instructions/`   | AGENTS.md + rules                               |
+| Instructions | `.github/instructions/`   | Root `AGENTS.md` + `.codex/rules/`              |
+| Prompts      | `.github/prompts/*.md`    | No dedicated runtime prompt directory           |
 | Rules        | Hook-based                | `.codex/rules/*.rules` (Starlark)               |
 | Agents       | `.github/agents/*.md`     | `.codex/agents/*.toml` + `[agents.*]` in config |
 | Security     | Hook-based enforcement    | Rules + hooks (Bash) + instructions             |

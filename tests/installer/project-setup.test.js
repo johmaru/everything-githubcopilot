@@ -5,6 +5,7 @@ const path = require('path');
 const { execFileSync } = require('child_process');
 
 const { getProjectInstallManifest } = require('../../scripts/installer/manifest');
+const projectSetup = require('../../scripts/installer/project-setup');
 
 function test(name, fn) {
   try {
@@ -170,6 +171,92 @@ results.push(test('project setup copies the shared manifest payload without over
   }
 }));
 
+results.push(test('project uninstall rejects tampered installer state that references sibling .agents content outside the managed bridge', () => {
+  const targetDir = createTestDir('egc-project-setup-');
+  const stateFile = path.join(targetDir, '.everything-githubcopilot-project-install.json');
+
+  try {
+    fs.writeFileSync(stateFile, JSON.stringify({
+      copiedFiles: ['.agents/custom-skill/SKILL.md'],
+      backupFiles: [],
+      dependencyState: null,
+    }, null, 2));
+
+    const error = runProjectInstallerFailure('uninstall', targetDir);
+
+    assert.notStrictEqual(error.status, 0, 'tampered sibling .agents content should fail closed');
+    assert.ok((error.stderr || '').includes('invalid or references unmanaged paths'), 'failure should explain the invalid installer state');
+  } finally {
+    cleanupTestDir(targetDir);
+  }
+}));
+
+results.push(test('project setup falls back to a copied .agents/skills bridge when junction creation fails', () => {
+  const targetDir = createTestDir('egc-project-setup-');
+  const originalSymlinkSync = fs.symlinkSync;
+  const originalSkipDepInstall = process.env.EGCOPILOT_SKIP_DEP_INSTALL;
+
+  try {
+    process.env.EGCOPILOT_SKIP_DEP_INSTALL = '1';
+    fs.symlinkSync = () => {
+      throw new Error('simulated junction failure');
+    };
+
+    projectSetup.installProject(targetDir);
+
+    const bridgeDir = path.join(targetDir, '.agents', 'skills');
+    const sampleSkill = path.join(bridgeDir, 'verification-loop', 'SKILL.md');
+
+    assert.ok(fs.existsSync(bridgeDir), 'fallback bridge should exist even when junction creation fails');
+    assert.ok(fs.statSync(bridgeDir).isDirectory(), 'fallback bridge should be a real directory');
+    assert.strictEqual(fs.lstatSync(bridgeDir).isSymbolicLink(), false, 'fallback bridge should not remain a broken symlink');
+    assert.ok(fs.existsSync(sampleSkill), 'fallback bridge should contain copied skills');
+
+    projectSetup.uninstallProject(targetDir);
+
+    assert.strictEqual(fs.existsSync(bridgeDir), false, 'uninstall should remove the fallback bridge');
+  } finally {
+    fs.symlinkSync = originalSymlinkSync;
+    if (originalSkipDepInstall === undefined) {
+      delete process.env.EGCOPILOT_SKIP_DEP_INSTALL;
+    } else {
+      process.env.EGCOPILOT_SKIP_DEP_INSTALL = originalSkipDepInstall;
+    }
+    cleanupTestDir(targetDir);
+  }
+}));
+
+results.push(test('project uninstall preserves preexisting empty .agents/skills directories after removing a copied fallback bridge', () => {
+  const targetDir = createTestDir('egc-project-setup-');
+  const originalSymlinkSync = fs.symlinkSync;
+  const originalSkipDepInstall = process.env.EGCOPILOT_SKIP_DEP_INSTALL;
+  const agentsDir = path.join(targetDir, '.agents');
+  const bridgeDir = path.join(agentsDir, 'skills');
+
+  try {
+    process.env.EGCOPILOT_SKIP_DEP_INSTALL = '1';
+    fs.mkdirSync(bridgeDir, { recursive: true });
+    fs.symlinkSync = () => {
+      throw new Error('simulated junction failure');
+    };
+
+    projectSetup.installProject(targetDir);
+    projectSetup.uninstallProject(targetDir);
+
+    assert.ok(fs.existsSync(agentsDir), 'uninstall should preserve the preexisting .agents directory');
+    assert.ok(fs.existsSync(bridgeDir), 'uninstall should preserve the preexisting empty .agents/skills directory');
+    assert.strictEqual(fs.readdirSync(bridgeDir).length, 0, 'preserved .agents/skills directory should be restored empty');
+  } finally {
+    fs.symlinkSync = originalSymlinkSync;
+    if (originalSkipDepInstall === undefined) {
+      delete process.env.EGCOPILOT_SKIP_DEP_INSTALL;
+    } else {
+      process.env.EGCOPILOT_SKIP_DEP_INSTALL = originalSkipDepInstall;
+    }
+    cleanupTestDir(targetDir);
+  }
+}));
+
 results.push(test('project setup refuses to target the source repository itself', () => {
   const repoRoot = path.join(__dirname, '..', '..');
   const error = runProjectSetupFailure(repoRoot);
@@ -224,6 +311,134 @@ results.push(test('project setup rejects symlink or junction escapes inside the 
   }
 }));
 
+results.push(test('project setup rejects managed paths redirected to sibling locations inside the target tree', () => {
+  const targetDir = createTestDir('egc-project-setup-');
+  const redirectedGithubDir = path.join(targetDir, '.shadow-github');
+  const linkedGithubDir = path.join(targetDir, '.github');
+
+  try {
+    fs.mkdirSync(redirectedGithubDir, { recursive: true });
+
+    try {
+      fs.symlinkSync(redirectedGithubDir, linkedGithubDir, process.platform === 'win32' ? 'junction' : 'dir');
+    } catch {
+      return;
+    }
+
+    const error = runProjectSetupFailure(targetDir);
+
+    assert.notStrictEqual(error.status, 0, 'setup should fail when a managed path is redirected to a sibling location');
+    assert.ok((error.stderr || '').includes('redirected managed path'), 'failure should explain the redirected managed path rejection');
+    assert.deepStrictEqual(fs.readdirSync(redirectedGithubDir), [], 'redirected managed directories should stay untouched when setup is rejected');
+  } finally {
+    cleanupTestDir(targetDir);
+  }
+}));
+
+results.push(test('project setup rejects in-root redirected dependency manifests before install', () => {
+  const targetDir = createTestDir('egc-project-setup-');
+  const redirectedManifestDir = path.join(targetDir, '.redirected-manifest');
+  const linkedPackageJson = path.join(targetDir, 'package.json');
+  const redirectedPackageJson = path.join(redirectedManifestDir, 'package.json');
+  const originalReadlinkSync = fs.readlinkSync;
+  const originalSkipDepInstall = process.env.EGCOPILOT_SKIP_DEP_INSTALL;
+
+  try {
+    process.env.EGCOPILOT_SKIP_DEP_INSTALL = '1';
+    fs.mkdirSync(redirectedManifestDir, { recursive: true });
+    fs.writeFileSync(redirectedPackageJson, '{"name":"redirected"}\n');
+
+    try {
+      fs.symlinkSync(redirectedPackageJson, linkedPackageJson, 'file');
+    } catch {
+      fs.writeFileSync(linkedPackageJson, '{"name":"redirected"}\n');
+      fs.readlinkSync = (targetPath, ...args) => {
+        if (targetPath === linkedPackageJson) {
+          return redirectedPackageJson;
+        }
+
+        return originalReadlinkSync.call(fs, targetPath, ...args);
+      };
+    }
+
+    assert.throws(
+      () => projectSetup.installProject(targetDir),
+      /redirected managed path/,
+      'setup should fail when package.json redirects to a sibling location inside target root'
+    );
+  } finally {
+    fs.readlinkSync = originalReadlinkSync;
+    if (originalSkipDepInstall === undefined) {
+      delete process.env.EGCOPILOT_SKIP_DEP_INSTALL;
+    } else {
+      process.env.EGCOPILOT_SKIP_DEP_INSTALL = originalSkipDepInstall;
+    }
+    cleanupTestDir(targetDir);
+  }
+}));
+
+results.push(test('project setup rejects broken dependency manifest links before creating a new package.json', () => {
+  const targetDir = createTestDir('egc-project-setup-');
+  const missingManifestDir = path.join(targetDir, '.missing-manifest');
+  const linkedPackageJson = path.join(targetDir, 'package.json');
+  const missingPackageJson = path.join(missingManifestDir, 'package.json');
+  const originalReadlinkSync = fs.readlinkSync;
+  const originalSkipDepInstall = process.env.EGCOPILOT_SKIP_DEP_INSTALL;
+
+  try {
+    process.env.EGCOPILOT_SKIP_DEP_INSTALL = '1';
+
+    try {
+      fs.symlinkSync(missingPackageJson, linkedPackageJson, 'file');
+    } catch {
+      fs.readlinkSync = (targetPath, ...args) => {
+        if (targetPath === linkedPackageJson) {
+          return missingPackageJson;
+        }
+
+        return originalReadlinkSync.call(fs, targetPath, ...args);
+      };
+    }
+
+    assert.throws(
+      () => projectSetup.installProject(targetDir),
+      /redirected managed path/,
+      'setup should reject a broken package.json link instead of treating it as a missing manifest'
+    );
+  } finally {
+    fs.readlinkSync = originalReadlinkSync;
+    if (originalSkipDepInstall === undefined) {
+      delete process.env.EGCOPILOT_SKIP_DEP_INSTALL;
+    } else {
+      process.env.EGCOPILOT_SKIP_DEP_INSTALL = originalSkipDepInstall;
+    }
+    cleanupTestDir(targetDir);
+  }
+}));
+
+results.push(test('project setup rejects .agents junction escapes inside the target tree', () => {
+  const targetDir = createTestDir('egc-project-setup-');
+  const escapedDir = createTestDir('egc-project-setup-escape-');
+  const linkedAgentsDir = path.join(targetDir, '.agents');
+
+  try {
+    try {
+      fs.symlinkSync(escapedDir, linkedAgentsDir, process.platform === 'win32' ? 'junction' : 'dir');
+    } catch {
+      return;
+    }
+
+    const error = runProjectSetupFailure(targetDir);
+
+    assert.notStrictEqual(error.status, 0, 'setup should fail when .agents escapes the target root');
+    assert.ok((error.stderr || '').includes('outside the target root'), 'failure should explain the escaped .agents path');
+    assert.deepStrictEqual(fs.readdirSync(escapedDir), [], 'escaped .agents directories should stay untouched when setup is rejected');
+  } finally {
+    cleanupTestDir(targetDir);
+    cleanupTestDir(escapedDir);
+  }
+}));
+
 results.push(test('project uninstall restores overwritten files and removes files created by the installer', () => {
   const targetDir = createTestDir('egc-project-setup-');
   const customCopilotInstructions = path.join(targetDir, '.github', 'copilot-instructions.md');
@@ -255,6 +470,77 @@ results.push(test('project uninstall restores overwritten files and removes file
   }
 }));
 
+results.push(test('project setup rejects live .agents/skills links that point away from .github/skills', () => {
+  const targetDir = createTestDir('egc-project-setup-');
+  const originalSkipDepInstall = process.env.EGCOPILOT_SKIP_DEP_INSTALL;
+  const agentsDir = path.join(targetDir, '.agents');
+  const skillsDir = path.join(targetDir, '.github', 'skills');
+  const wrongSkillsDir = path.join(targetDir, 'custom-skills');
+  const bridgeDir = path.join(agentsDir, 'skills');
+
+  try {
+    process.env.EGCOPILOT_SKIP_DEP_INSTALL = '1';
+    fs.mkdirSync(agentsDir, { recursive: true });
+    fs.mkdirSync(skillsDir, { recursive: true });
+    fs.mkdirSync(wrongSkillsDir, { recursive: true });
+    fs.writeFileSync(path.join(wrongSkillsDir, 'SKILL.md'), '# wrong\n');
+
+    try {
+      fs.symlinkSync(wrongSkillsDir, bridgeDir, process.platform === 'win32' ? 'junction' : 'dir');
+    } catch {
+      return;
+    }
+
+    assert.throws(
+      () => projectSetup.installProject(targetDir),
+      /unexpected target|Remove it and rerun project setup/,
+      'setup should fail closed when an existing live bridge points to the wrong target'
+    );
+  } finally {
+    if (originalSkipDepInstall === undefined) {
+      delete process.env.EGCOPILOT_SKIP_DEP_INSTALL;
+    } else {
+      process.env.EGCOPILOT_SKIP_DEP_INSTALL = originalSkipDepInstall;
+    }
+    cleanupTestDir(targetDir);
+  }
+}));
+
+results.push(test('project setup accepts live .agents/skills links that already point to .github/skills', () => {
+  const targetDir = createTestDir('egc-project-setup-');
+  const originalSkipDepInstall = process.env.EGCOPILOT_SKIP_DEP_INSTALL;
+  const agentsDir = path.join(targetDir, '.agents');
+  const skillsDir = path.join(targetDir, '.github', 'skills');
+  const bridgeDir = path.join(agentsDir, 'skills');
+
+  try {
+    process.env.EGCOPILOT_SKIP_DEP_INSTALL = '1';
+    fs.mkdirSync(agentsDir, { recursive: true });
+    fs.mkdirSync(skillsDir, { recursive: true });
+
+    try {
+      fs.symlinkSync(skillsDir, bridgeDir, process.platform === 'win32' ? 'junction' : 'dir');
+    } catch {
+      return;
+    }
+
+    projectSetup.installProject(targetDir);
+
+    projectSetup.uninstallProject(targetDir);
+
+    assert.ok(fs.existsSync(bridgeDir), 'uninstall should preserve a preexisting valid live bridge');
+    assert.ok(fs.existsSync(skillsDir), 'uninstall should restore the preexisting .github/skills directory behind the valid live bridge');
+    assert.strictEqual(fs.readdirSync(skillsDir).length, 0, 'uninstall should restore the preexisting .github/skills directory to its original empty state');
+  } finally {
+    if (originalSkipDepInstall === undefined) {
+      delete process.env.EGCOPILOT_SKIP_DEP_INSTALL;
+    } else {
+      process.env.EGCOPILOT_SKIP_DEP_INSTALL = originalSkipDepInstall;
+    }
+    cleanupTestDir(targetDir);
+  }
+}));
+
 results.push(test('project uninstall refuses to run without installer state', () => {
   const targetDir = createTestDir('egc-project-setup-');
 
@@ -267,6 +553,87 @@ results.push(test('project uninstall refuses to run without installer state', ()
     assert.notStrictEqual(error.status, 0, 'uninstall should fail without state');
     assert.ok((error.stderr || '').includes('No installer state file found'), 'failure should explain that uninstall requires installer state');
   } finally {
+    cleanupTestDir(targetDir);
+  }
+}));
+
+results.push(test('project uninstall allows legacy redirected installs that stayed inside the target root to clean up safely', () => {
+  const targetDir = createTestDir('egc-project-setup-');
+  const redirectedGithubDir = path.join(targetDir, '.legacy-github');
+  const linkedGithubDir = path.join(targetDir, '.github');
+  const managedFile = path.join(redirectedGithubDir, 'copilot-instructions.md');
+  const stateFile = path.join(targetDir, '.everything-githubcopilot-project-install.json');
+
+  try {
+    fs.mkdirSync(redirectedGithubDir, { recursive: true });
+    fs.writeFileSync(managedFile, '# installed by legacy setup\n');
+
+    try {
+      fs.symlinkSync(redirectedGithubDir, linkedGithubDir, process.platform === 'win32' ? 'junction' : 'dir');
+    } catch {
+      return;
+    }
+
+    fs.writeFileSync(stateFile, JSON.stringify({
+      version: 1,
+      copiedFiles: ['.github/copilot-instructions.md'],
+      backupFiles: [],
+      preservedDirectories: [],
+      dependencyState: null,
+    }, null, 2));
+
+    projectSetup.uninstallProject(targetDir);
+
+    assert.strictEqual(fs.existsSync(managedFile), false, 'legacy uninstall should remove redirected managed files that stayed inside target root');
+    assert.strictEqual(fs.existsSync(stateFile), false, 'legacy uninstall should remove the installer state after successful cleanup');
+  } finally {
+    cleanupTestDir(targetDir);
+  }
+}));
+
+results.push(test('project uninstall rejects redirected dependency manifests before running dependency removal', () => {
+  const targetDir = createTestDir('egc-project-setup-');
+  const packageJsonPath = path.join(targetDir, 'package.json');
+  const redirectedPackageJson = path.join(targetDir, '.redirected-package', 'package.json');
+  const stateFile = path.join(targetDir, '.everything-githubcopilot-project-install.json');
+  const originalReadlinkSync = fs.readlinkSync;
+
+  try {
+    fs.mkdirSync(path.dirname(redirectedPackageJson), { recursive: true });
+    fs.writeFileSync(packageJsonPath, '{"name":"target"}\n');
+
+    fs.writeFileSync(stateFile, JSON.stringify({
+      version: 2,
+      copiedFiles: [],
+      backupFiles: [],
+      preservedDirectories: [],
+      dependencyState: {
+        packageManager: 'npm',
+        skippedDependencyInstall: false,
+        hadPackageJson: true,
+        createdPackageJson: false,
+        preexistingLockfiles: [],
+        generatedLockfiles: [],
+        hadNodeModules: false,
+        createdNodeModules: false,
+      },
+    }, null, 2));
+
+    fs.readlinkSync = (targetPath, ...args) => {
+      if (targetPath === packageJsonPath) {
+        return redirectedPackageJson;
+      }
+
+      return originalReadlinkSync.call(fs, targetPath, ...args);
+    };
+
+    assert.throws(
+      () => projectSetup.uninstallProject(targetDir),
+      /redirected managed path/,
+      'uninstall should reject redirected dependency manifests before invoking package-manager removal'
+    );
+  } finally {
+    fs.readlinkSync = originalReadlinkSync;
     cleanupTestDir(targetDir);
   }
 }));

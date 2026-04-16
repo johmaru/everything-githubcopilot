@@ -27,8 +27,8 @@ notify = [
   "-sound", "default",
 ]
 
-# Prefer AGENTS.md and project-local .codex/AGENTS.md for instructions.
-# model_instructions_file replaces built-in instructions instead of AGENTS.md,
+# Prefer the root AGENTS.md for project instructions.
+# model_instructions_file replaces built-in instructions and AGENTS.md,
 # so leave it unset unless you intentionally want a single override file.
 # model_instructions_file = "/absolute/path/to/instructions.md"
 

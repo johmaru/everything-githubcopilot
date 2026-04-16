@@ -1,3 +1,8 @@
+---
+name: safety-guard
+description: Prevent destructive commands and constrain agent write scope during sensitive or autonomous work.
+---
+
 # Safety Guard — Prevent Destructive Operations
 
 ## When to Use

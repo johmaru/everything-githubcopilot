@@ -5,6 +5,7 @@ Common issues and fixes for the GitHub Copilot-first customization layout in thi
 ## Table of Contents
 
 - [Instructions, Prompts, Or Agents Not Showing Up](#instructions-prompts-or-agents-not-showing-up)
+- [Codex Skills Or Guidance Not Showing Up](#codex-skills-or-guidance-not-showing-up)
 - [Legacy `.claude` Behavior Is Still Taking Over](#legacy-claude-behavior-is-still-taking-over)
 - [Validation Fails](#validation-fails)
 - [Hook Problems](#hook-problems)
@@ -43,6 +44,35 @@ Fixes:
 - repair frontmatter and rerun validation
 - keep prompt and agent names explicit and consistent
 - narrow `applyTo` instead of relying on broad or ambiguous matching
+
+---
+
+## Codex Skills Or Guidance Not Showing Up
+
+**Symptoms:** Codex CLI misses the expected guidance, does not see project skills, or warns about invalid `SKILL.md` files under `~/.codex/skills`.
+
+**Check these first:**
+
+```bash
+# Inspect the project-local Codex surfaces
+dir AGENTS.md
+dir .codex
+dir .agents\skills
+```
+
+Common causes:
+
+- project setup was never run for this project
+- the `.agents/skills/` bridge is missing in the project
+- you are expecting runtime `.codex/instructions/` or `.codex/prompts/`, which this repository does not ship
+- invalid home-level skills exist under `~/.codex/skills` and are outside this repository
+
+Fixes:
+
+- run the project setup command again for the target project and confirm that `.agents/skills/` exists afterward
+- use the root `AGENTS.md`, `.codex/config.toml`, `.codex/agents/`, `.codex/hooks.json`, `.codex/rules/`, and the project-local `.agents/skills/` bridge as the Codex runtime surfaces
+- repair or remove broken home-level skills under `~/.codex/skills`
+- if the warning path is outside the repository, treat it as user-environment state rather than a shipped package bug
 
 ---
 

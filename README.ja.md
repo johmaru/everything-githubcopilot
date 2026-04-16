@@ -59,7 +59,11 @@ npm run lint
 
 すべての Copilot カスタマイズを shared project payload として任意のプロジェクトへコピーします。`.github/` 一式、`.github/workflows/`、`AGENTS.md`、`schemas/`、`scripts/ci/`、`scripts/hooks/`、`tests/fixtures/`、`rust/semantic-indexer/`、そして `.vscode/settings.json` が未作成ならその設定も同期します。既存の `.vscode/settings.json` は上書きせず、警告だけを出して保持します。
 
+Codex CLI 向けには、project setup が project-local な `.codex/` runtime assets を配布し、`.github/skills/` を Codex から見せるための `.agents/skills/` ブリッジ作成も試みます。Codex は project instructions として root の `AGENTS.md` を読み続けます。`.codex/AGENTS.md` は shipped な Codex surface 向けの互換メモとして扱われます。
+
 runtime 依存は target project から検出できる package manager (`packageManager`, `pnpm-lock.yaml`, `yarn.lock`, `package-lock.json`, `bun.lockb` / `bun.lock`) を優先して導入し、見つからない時だけ `npm` にフォールバックします。同梱する依存は `@huggingface/transformers`, `ajv`, `better-sqlite3`, `sqlite-vec` です。
+
+target path は必須で、source checkout の外側でなければなりません。setup wrapper は source repository の親 directory への暗黙 fallback を行いません。
 
 ```powershell
 # Windows
@@ -76,6 +80,8 @@ runtime 依存は target project から検出できる package manager (`package
 ## ユーザー単位でインストール
 
 インストラクション、エージェント、スキル、プロンプト、フック、スキーマを `~/.copilot/` にインストールし、現在のユーザーの VS Code 設定を更新して全ワークスペースから参照できるようにします。
+
+注: user-level installer は VS Code Copilot 向けです。Codex CLI 用の `.codex/` と project-local な `.agents/skills/` ブリッジは project setup で各 project に配布してください。`~/.codex/skills` は管理対象外なので、そこに出る invalid `SKILL.md` 警告は user 環境側で修正または削除する必要があります。
 
 user settings では、`~/.copilot` の instructions / agents / skills / prompts / hooks の discovery を有効化し、`AGENTS.md` discovery を有効、`CLAUDE.md` discovery を無効のまま維持します。あわせて legacy `.claude` rules / hooks の discovery は明示的に無効化して、repo の shipped baseline に揃えます。
 
@@ -126,6 +132,15 @@ installer は未公開の Autopilot 設定や default approvals、allowed tools 
   hooks/deterministic-hooks.json   # 確定的フック
   skills/                          # 120+ スキル定義
   workflows/                       # CI / release workflows
+
+.codex/                            # Codex CLI compatibility surface
+  config.toml                      # Codex reference configuration
+  AGENTS.md                        # Codex compatibility notes
+  agents/                          # Codex multi-agent role configs
+  hooks.json                       # Codex-compatible hooks
+  rules/                           # Codex execution policy rules
+
+.agents/skills/                    # project setup が作成する Codex skill bridge
 ```
 
 ---

@@ -84,6 +84,7 @@ results.push(test('project install manifest includes the current shipped project
     'tests/fixtures',
   ]);
   assert.strictEqual(instructionsOperation.recursive, true);
+  assert.deepStrictEqual(manifest.managedPaths, ['.agents/skills']);
 }));
 
 results.push(test('user install manifest does not include .codex (Codex reads from project root, not ~/.copilot)', () => {

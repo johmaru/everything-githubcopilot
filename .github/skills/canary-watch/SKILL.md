@@ -1,3 +1,8 @@
+---
+name: canary-watch
+description: Monitor deployed pages and APIs for post-deploy regressions in availability, console errors, and performance thresholds.
+---
+
 # Canary Watch — Post-Deploy Monitoring
 
 ## When to Use
