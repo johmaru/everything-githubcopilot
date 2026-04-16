@@ -640,6 +640,31 @@ function restoreProjectFromState(targetRoot, state, options = {}) {
   return warnings;
 }
 
+function ensureSkillsJunction(targetRoot) {
+  const agentsDir = path.join(targetRoot, '.agents');
+  const junctionPath = path.join(agentsDir, 'skills');
+  const skillsSource = path.join(targetRoot, '.github', 'skills');
+
+  if (!fs.existsSync(skillsSource)) {
+    return;
+  }
+
+  fs.mkdirSync(agentsDir, { recursive: true });
+
+  if (fs.existsSync(junctionPath)) {
+    const stat = fs.lstatSync(junctionPath);
+    if (stat.isSymbolicLink() || stat.isDirectory()) {
+      return;
+    }
+  }
+
+  try {
+    fs.symlinkSync(skillsSource, junctionPath, 'junction');
+  } catch {
+    // junction creation may fail on some systems; not fatal
+  }
+}
+
 function installProject(targetRoot) {
   const repoRoot = path.join(__dirname, '..', '..');
   const { stateFile, backupRoot } = getProjectInstallPaths(targetRoot);
@@ -663,6 +688,8 @@ function installProject(targetRoot) {
     }
 
     const payload = copyProjectPayload(repoRoot, targetRoot, backupRoot, transientState);
+
+    ensureSkillsJunction(targetRoot);
 
     const backupFiles = new Set(transientState.backupFiles);
     const dependencyState = collectDependencyState(targetRoot, backupRoot, backupFiles);

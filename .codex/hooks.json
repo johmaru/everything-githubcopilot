@@ -1,0 +1,98 @@
+{
+  "$schema": "../../schemas/hooks.schema.json",
+  "hooks": {
+    "SessionStart": [
+      {
+        "matcher": "startup|resume",
+        "description": "Inject prior session summary for cross-session continuity.",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node -e \"var s='./scripts/hooks/session-start.js';require('fs').existsSync(s)&&require(s)\"",
+            "timeout": 60
+          }
+        ]
+      }
+    ],
+    "PreToolUse": [
+      {
+        "matcher": "^git(\\s|$)",
+        "description": "Block git hook-bypass flags (--no-verify).",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node -e \"var s='./scripts/hooks/codex-pre-tool-use.js';require('fs').existsSync(s)&&require(s)\"",
+            "timeout": 5
+          }
+        ]
+      },
+      {
+        "matcher": "^git\\s+push(\\s|$)",
+        "description": "Warn before git push so the diff gets reviewed first.",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node -e \"var s='./scripts/hooks/pre-bash-git-push-reminder.js';require('fs').existsSync(s)&&require(s)\"",
+            "timeout": 5
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": ".*",
+        "description": "Record tool usage observations for knowledge extraction (Bash commands only in Codex).",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node -e \"var s='./scripts/hooks/observe-tool.js';require('fs').existsSync(s)&&require(s)\"",
+            "timeout": 5
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "description": "Persist session summary for next-session context.",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node -e \"var s='./scripts/hooks/session-stop.js';require('fs').existsSync(s)&&require(s)\"",
+            "timeout": 10
+          }
+        ]
+      },
+      {
+        "description": "Delete temporary safety backups for this session.",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node ./scripts/hooks/safety-backup.js cleanup",
+            "timeout": 10
+          }
+        ]
+      },
+      {
+        "description": "Delete temporary async typecheck state for this session.",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node ./scripts/hooks/post-edit-typecheck.js cleanup",
+            "timeout": 10
+          }
+        ]
+      }
+    ]
+  },
+  "_codex_notes": {
+    "unsupported_events": [
+      "PostToolUseFailure — not a Codex event. Tool-call-correction runs only in VS Code Copilot.",
+      "PreCompact — not a Codex event. Pre-compact runs only in VS Code Copilot."
+    ],
+    "bash_only_limitation": [
+      "PreToolUse/PostToolUse only fire for Bash tool calls in Codex CLI.",
+      "Write/Edit/MultiEdit hooks (doc-file-warning, config-protection, quality-gate, post-edit-format, post-edit-typecheck, post-edit-console-warn) cannot run in Codex.",
+      "Use AGENTS.md instructions and security.rules to enforce these policies instead."
+    ]
+  }
+}

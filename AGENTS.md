@@ -13,7 +13,7 @@ This repository is a GitHub Copilot customization pack for VS Code. `.github/` i
 
 ### Compatibility Surfaces
 
-- `.codex/` — Codex CLI compatibility surface (config, agents, AGENTS.md). Distributed via project setup. Not the active source of truth; `.github/` takes precedence.
+- `.codex/` — Codex CLI compatibility surface (config, 24 agents, hooks, rules, AGENTS.md). Distributed via project setup. `.agents/skills/` is a junction to `.github/skills/` for Codex skill auto-discovery. Not the active source of truth; `.github/` takes precedence.
 - `.opencode/` — OpenCode compatibility surface.
 
 ## Working Rules

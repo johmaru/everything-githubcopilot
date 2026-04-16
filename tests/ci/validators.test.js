@@ -1885,6 +1885,32 @@ results.push(test('validate-copilot-customizations passes when .codex is clean a
   }
 }));
 
+results.push(test('validate-copilot-customizations allows .agents/skills/ when path exists', () => {
+  const testDir = createTestDir();
+  try {
+    writeMinimalRepoFixtures(testDir);
+    fs.mkdirSync(path.join(testDir, '.codex'), { recursive: true });
+    fs.writeFileSync(path.join(testDir, '.codex', 'config.toml'), 'approval_policy = "on-request"\n');
+    fs.writeFileSync(path.join(testDir, '.codex', 'AGENTS.md'), '# Codex\n\nSkills from `.agents/skills/` directory.\n');
+    fs.writeFileSync(path.join(testDir, 'README.md'), '# Test\n\n`.codex/` compatibility surface.\n');
+    fs.mkdirSync(path.join(testDir, '.agents', 'skills'), { recursive: true });
+
+    const result = runValidatorWithOverrides('validate-copilot-customizations', {
+      ROOT: testDir,
+      GITHUB_DIR: path.join(testDir, '.github'),
+      README_PATH: path.join(testDir, 'README.md'),
+      COPILOT_INSTRUCTIONS: path.join(testDir, '.github', 'copilot-instructions.md'),
+      INSTRUCTIONS_DIR: path.join(testDir, '.github', 'instructions'),
+      PROMPTS_DIR: path.join(testDir, '.github', 'prompts'),
+      AGENTS_DIR: path.join(testDir, '.github', 'agents'),
+    });
+
+    assert.strictEqual(result.code, 0, result.stderr);
+  } finally {
+    cleanupTestDir(testDir);
+  }
+}));
+
 const passed = results.filter(Boolean).length;
 const failed = results.length - passed;
 

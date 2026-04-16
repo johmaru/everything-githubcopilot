@@ -78,6 +78,8 @@ args = ["-y", "@modelcontextprotocol/server-sequential-thinking"]
 [features]
 # Codex multi-agent support is experimental as of March 2026.
 multi_agent = true
+# Enable experimental hooks (PreToolUse/PostToolUse for Bash only, SessionStart, Stop).
+codex_hooks = true
 
 # Profiles — switch with `codex -p <name>`
 [profiles.strict]
@@ -105,3 +107,91 @@ config_file = "agents/reviewer.toml"
 [agents.docs_researcher]
 description = "Documentation specialist that verifies APIs, framework behavior, and release notes."
 config_file = "agents/docs-researcher.toml"
+
+# --- Core agents (4) ---
+
+[agents.planner]
+description = "Strategic planning and analysis before implementation."
+config_file = "agents/planner.toml"
+
+[agents.coder]
+description = "Implementation and verification with mandatory verification loops."
+config_file = "agents/coder.toml"
+
+[agents.researcher]
+description = "Read-only codebase investigation subagent for dependency tracing and architecture analysis."
+config_file = "agents/researcher.toml"
+
+[agents.supporter]
+description = "Safe support without file edits. Clarifies requirements and advises before implementation."
+config_file = "agents/supporter.toml"
+
+# --- Specialist agents (17) ---
+
+[agents.architect]
+description = "Architecture review, trade-off analysis, and system design guidance."
+config_file = "agents/architect.toml"
+
+[agents.tdd_guide]
+description = "Write-tests-first workflow for implementing or fixing scripts and validators."
+config_file = "agents/tdd-guide.toml"
+
+[agents.code_reviewer]
+description = "Review correctness, loading behavior, security, and maintainability after changes."
+config_file = "agents/code-reviewer.toml"
+
+[agents.security_reviewer]
+description = "Review for secrets, unsafe commands, injection risks, and security issues."
+config_file = "agents/security-reviewer.toml"
+
+[agents.build_error_resolver]
+description = "Fix build failures, type errors, and import errors with minimal diffs."
+config_file = "agents/build-error-resolver.toml"
+
+[agents.e2e_runner]
+description = "Generate, update, or run end-to-end tests for critical user journeys."
+config_file = "agents/e2e-runner.toml"
+
+[agents.refactor_cleaner]
+description = "Identify dead code and unused dependencies for safe removal."
+config_file = "agents/refactor-cleaner.toml"
+
+[agents.safety_checker]
+description = "Post-edit safety inspection for high-risk changes with backup creation."
+config_file = "agents/safety-checker.toml"
+
+[agents.agent_auditor]
+description = "Audit agent definition files for structural integrity and consistency."
+config_file = "agents/agent-auditor.toml"
+
+[agents.best_practice_researcher]
+description = "Research best practices before implementation with source attribution."
+config_file = "agents/best-practice-researcher.toml"
+
+[agents.code_structure_auditor]
+description = "Audit structural integrity: imports, cross-references, file sizes, JSON validity."
+config_file = "agents/code-structure-auditor.toml"
+
+[agents.design_coherence_auditor]
+description = "Check whether schemas and types support their stated purpose."
+config_file = "agents/design-coherence-auditor.toml"
+
+[agents.docs_lookup]
+description = "Answer documentation questions from live sources instead of memory."
+config_file = "agents/docs-lookup.toml"
+
+[agents.go_reviewer]
+description = "Review Go changes for idiomatic patterns, concurrency safety, and security."
+config_file = "agents/go-reviewer.toml"
+
+[agents.knowledge_curator]
+description = "Capture session learnings and maintain the knowledge base."
+config_file = "agents/knowledge-curator.toml"
+
+[agents.python_reviewer]
+description = "Review Python changes for security, type hints, and Pythonic patterns."
+config_file = "agents/python-reviewer.toml"
+
+[agents.typescript_reviewer]
+description = "Review TypeScript/JavaScript changes for type safety, async correctness, and security."
+config_file = "agents/typescript-reviewer.toml"

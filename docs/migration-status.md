@@ -64,6 +64,17 @@ planner, coder, researcher, supporter
 - `package.json`: name=`everything-githubcopilot`, version=`2.0.0`
 - Runtime dependencies: `@huggingface/transformers`, `ajv`, `better-sqlite3`, `sqlite-vec`
 
+### Codex CLI compatibility surface
+
+- `.codex/config.toml` — runtime config with 24 agents, MCP servers, profiles, `codex_hooks = true`
+- `.codex/agents/` — 24 TOML agent definitions (4 core + 17 specialist + 3 legacy)
+- `.codex/hooks.json` — Codex-compatible hooks (SessionStart, PreToolUse, PostToolUse, Stop)
+- `.codex/rules/security.rules` — Starlark execution policy (config protection, destructive command guards)
+- `.codex/AGENTS.md` — Codex-specific guidance with hooks, rules, and agent documentation
+- `.agents/skills/` — junction to `.github/skills/` for Codex skill auto-discovery
+- `scripts/hooks/codex-pre-tool-use.js` — PreToolUse hook blocking `--no-verify`
+- Project setup (`scripts/installer/project-setup.js`) creates the `.agents/skills` junction
+
 ### Documentation
 
 - `README.md` rewritten for Copilot-first framing

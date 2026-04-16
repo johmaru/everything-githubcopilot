@@ -13,75 +13,129 @@ This supplements the root `AGENTS.md` with Codex-specific guidance.
 
 ## Skills Discovery
 
-Skills are defined under `.github/skills/` in this repository. Each skill contains:
+Skills are auto-discovered from `.agents/skills/` (a junction to `.github/skills/`).
+Each skill contains a `SKILL.md` with name/description frontmatter.
 
-- `SKILL.md` — Detailed instructions and workflow
+- Invoke explicitly via `$skill-name`
+- Or implicitly via description matching in the agent prompt
 
-Available skills:
+Available skills (selected highlights from 110+):
 
 - tdd-workflow — Test-driven development with 80%+ coverage
 - security-review — Comprehensive security checklist
 - coding-standards — Universal coding standards
+- verification-loop — Build, test, lint, typecheck, security
+- api-design — REST API design patterns
 - frontend-patterns — React/Next.js patterns
-- frontend-slides — Viewport-safe HTML presentations and PPTX-to-web conversion
-- article-writing — Long-form writing from notes and voice references
-- content-engine — Platform-native social content and repurposing
-- market-research — Source-attributed market and competitor research
-- investor-materials — Decks, memos, models, and one-pagers
-- investor-outreach — Personalized investor outreach and follow-ups
 - backend-patterns — API design, database, caching
 - e2e-testing — Playwright E2E tests
-- eval-harness — Eval-driven development
-- strategic-compact — Context management
-- api-design — REST API design patterns
-- verification-loop — Build, test, lint, typecheck, security
 - deep-research — Multi-source research with firecrawl and exa MCPs
-- exa-search — Neural search via Exa MCP for web, code, and companies
-- claude-api — Anthropic Claude API patterns and SDKs
-- x-api — X/Twitter API integration for posting, threads, and analytics
-- crosspost — Multi-platform content distribution
-- fal-ai-media — AI image/video/audio generation via fal.ai
-- dmux-workflows — Multi-agent orchestration with dmux
+- exa-search — Neural search via Exa MCP
+- blueprint — Multi-session construction plans
+- schema-optimization — Tool call schema improvements
+- truncation-guard — File read truncation protection
+
+## Hooks
+
+Codex supports experimental hooks via `features.codex_hooks = true` in config.toml.
+
+**Supported events:**
+
+- `SessionStart` — fires on startup or resume
+- `PreToolUse` — fires before Bash commands only (not Write/Edit/MCP)
+- `PostToolUse` — fires after Bash commands only
+- `Stop` — fires when session ends
+
+**Active hooks in `.codex/hooks.json`:**
+
+- PreToolUse: block `--no-verify` on git commands, warn before `git push`
+- PostToolUse: record tool observations
+- SessionStart: inject prior session summary
+- Stop: persist session summary, cleanup backups and typecheck state
+
+**Limitations:**
+
+- PreToolUse/PostToolUse only intercept Bash tool calls
+- Write/Edit/MultiEdit enforcement uses `.codex/rules/security.rules` instead
+- Windows hooks are temporarily disabled
+
+## Execution Policy (Rules)
+
+Security and config protection that cannot run via hooks (Write/Edit interception)
+is enforced via `.codex/rules/security.rules` in Starlark format:
+
+- Linter/formatter config files are forbidden from edits
+- `git push --force`, `git reset --hard`, `rm -rf` require confirmation
+- `DROP TABLE` and `DROP DATABASE` are forbidden
+
+Test rules with: `codex execpolicy check "edit eslint.config.js"`
 
 ## MCP Servers
 
-Treat the project-local `.codex/config.toml` as the default Codex baseline for ECC. The current ECC baseline enables GitHub, Context7, Exa, Memory, Playwright, and Sequential Thinking; add heavier extras in `~/.codex/config.toml` only when a task actually needs them.
-
-To customize MCP servers, edit `.codex/config.toml` directly or add user-level overrides in `~/.codex/config.toml`.
+Treat the project-local `.codex/config.toml` as the default Codex baseline for ECC.
+The current baseline enables GitHub, Context7, Exa, Memory, Playwright, and Sequential Thinking.
+Add heavier extras in `~/.codex/config.toml` only when a task actually needs them.
 
 ## Multi-Agent Support
 
-Codex now supports multi-agent workflows behind the experimental `features.multi_agent` flag.
+Codex supports multi-agent workflows via `features.multi_agent = true`.
 
-- Enable it in `.codex/config.toml` with `[features] multi_agent = true`
-- Define project-local roles under `[agents.<name>]`
-- Point each role at a TOML layer under `.codex/agents/`
-- Use `/agent` inside Codex CLI to inspect and steer child agents
+**24 agents registered** in `.codex/config.toml`:
 
-Sample role configs in this repo:
+Core agents (4):
 
-- `.codex/agents/explorer.toml` — read-only evidence gathering
-- `.codex/agents/reviewer.toml` — correctness/security review
-- `.codex/agents/docs-researcher.toml` — API and release-note verification
+- planner — Strategic planning and analysis (read-only)
+- coder — Implementation with verification loops (workspace-write)
+- researcher — Deep codebase investigation (read-only)
+- supporter — Safe guidance without file edits (read-only)
 
-## Key Differences from Claude Code
+Specialist agents (17):
 
-| Feature      | Claude Code              | Codex CLI                                            |
-| ------------ | ------------------------ | ---------------------------------------------------- |
-| Hooks        | 8+ event types           | Not yet supported                                    |
-| Context file | CLAUDE.md + AGENTS.md    | AGENTS.md only                                       |
-| Skills       | Skills loaded via plugin | `.github/skills/` directory                          |
-| Commands     | `/slash` commands        | Instruction-based                                    |
-| Agents       | Subagent Task tool       | Multi-agent via `/agent` and `[agents.<name>]` roles |
-| Security     | Hook-based enforcement   | Instruction + sandbox                                |
-| MCP          | Full support             | Supported via `config.toml` and `codex mcp add`      |
+- architect, tdd-guide, code-reviewer, security-reviewer
+- build-error-resolver, e2e-runner, refactor-cleaner, safety-checker
+- agent-auditor, best-practice-researcher, code-structure-auditor
+- design-coherence-auditor, docs-lookup, go-reviewer
+- knowledge-curator, python-reviewer, typescript-reviewer
 
-## Security Without Hooks
+Legacy agents (3):
 
-Since Codex lacks hooks, security enforcement is instruction-based:
+- explorer — Read-only codebase explorer
+- reviewer — PR review for correctness and security
+- docs-researcher — API and release-note verification
 
-1. Always validate inputs at system boundaries
-2. Never hardcode secrets — use environment variables
-3. Run `npm audit` / `pip audit` before committing
-4. Review `git diff` before every push
-5. Use `sandbox_mode = "workspace-write"` in config
+Use `/agent` inside Codex CLI to inspect and steer agents.
+
+## Implementation Lane
+
+planner → coder → researcher (review)
+On failure: coder → planner (re-plan)
+
+## Support Lane (no edits)
+
+supporter → planner (promote to implementation)
+supporter → researcher (deep investigation)
+
+## Key Differences from VS Code Copilot
+
+| Feature      | VS Code Copilot           | Codex CLI                                       |
+| ------------ | ------------------------- | ----------------------------------------------- |
+| Hooks        | 8+ event types, all tools | 4 events, Bash-only for Pre/PostToolUse         |
+| Context file | copilot-instructions.md   | AGENTS.md                                       |
+| Skills       | Plugin-based discovery    | `.agents/skills/` auto-discovery                |
+| Instructions | `.github/instructions/`   | AGENTS.md + rules                               |
+| Rules        | Hook-based                | `.codex/rules/*.rules` (Starlark)               |
+| Agents       | `.github/agents/*.md`     | `.codex/agents/*.toml` + `[agents.*]` in config |
+| Security     | Hook-based enforcement    | Rules + hooks (Bash) + instructions             |
+| MCP          | Full support              | Full support via `config.toml`                  |
+
+## Security Enforcement
+
+1. **Rules**: `.codex/rules/security.rules` blocks forbidden file edits and destructive commands
+2. **Hooks**: PreToolUse blocks `--no-verify` and warns before `git push`
+3. **Instructions**: AGENTS.md enforces input validation, secret management, and review workflows
+4. **Sandbox**: Agent-level `sandbox_mode` restricts file access (read-only, workspace-write)
+5. Always validate inputs at system boundaries
+6. Never hardcode secrets — use environment variables
+7. Run `npm audit` / `pip audit` before committing
+8. Review `git diff` before every push
+9. Use `sandbox_mode = "workspace-write"` in config

@@ -699,7 +699,7 @@ function validateCodexContracts(errors) {
     ];
 
     for (const { pattern, label } of staleRefs) {
-      if (content.includes(pattern)) {
+      if (content.includes(pattern) && !fs.existsSync(path.join(ROOT, label))) {
         errors.push(`ERROR: P1-012: .codex/AGENTS.md references non-existent path '${label}'`);
       }
     }
