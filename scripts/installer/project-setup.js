@@ -5,6 +5,9 @@ const path = require('path');
 const { execSync } = require('child_process');
 
 const { getProjectInstallManifest, getRuntimeDependencies } = require('./manifest');
+const LAUNCHER_ARTIFACTS_RELATIVE_PATH = '.github/sessions/codex-flow';
+const LAUNCHER_CHECKPOINT_RELATIVE_PATH = '.github/sessions/checkpoint.md';
+const LAUNCHER_CHECKPOINT_MARKER = 'X-Codex-Flow-Checkpoint: 1';
 
 const PROJECT_INSTALL_STATE_FILE = '.everything-githubcopilot-project-install.json';
 const PROJECT_INSTALL_BACKUP_DIR = '.everything-githubcopilot-project-install-backup';
@@ -92,6 +95,15 @@ function getLinkTargetPath(targetPath) {
   }
 }
 
+function pathEntryExists(targetPath) {
+  try {
+    fs.lstatSync(targetPath);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 function ensureManagedPathUsesCanonicalLocation(targetRoot, targetPath) {
   const resolvedTargetRoot = path.resolve(targetRoot);
   const resolvedTargetPath = path.resolve(targetPath);
@@ -105,7 +117,7 @@ function ensureManagedPathUsesCanonicalLocation(targetRoot, targetPath) {
   for (const segment of relativePath.split(path.sep).filter(Boolean)) {
     currentPath = path.join(currentPath, segment);
 
-    if (!fs.existsSync(currentPath)) {
+    if (!pathEntryExists(currentPath)) {
       continue;
     }
 
@@ -159,6 +171,80 @@ function ensureExistingPathResolvesInsideTargetRoot(targetRoot, targetPath) {
   if (realTargetPath !== realTargetRoot && !realTargetPath.startsWith(`${realTargetRoot}${path.sep}`)) {
     throw new Error(`refusing to access symlinked content outside the target root: ${targetPath}`);
   }
+}
+
+function removeGeneratedLauncherArtifacts(targetRoot, options = {}) {
+  const launcherArtifactsPath = resolveRelativePath(targetRoot, LAUNCHER_ARTIFACTS_RELATIVE_PATH, options);
+  ensureExistingPathResolvesInsideTargetRoot(targetRoot, launcherArtifactsPath);
+  fs.rmSync(launcherArtifactsPath, { recursive: true, force: true });
+  pruneEmptyParents(path.dirname(launcherArtifactsPath), targetRoot);
+}
+
+function removeGeneratedLauncherCheckpoint(targetRoot, options = {}) {
+  const checkpointPath = resolveRelativePath(targetRoot, LAUNCHER_CHECKPOINT_RELATIVE_PATH, options);
+  ensureExistingPathResolvesInsideTargetRoot(targetRoot, checkpointPath);
+
+  if (!fs.existsSync(checkpointPath)) {
+    return;
+  }
+
+  try {
+    const checkpointContent = fs.readFileSync(checkpointPath, 'utf8');
+    if (!(checkpointContent.includes(LAUNCHER_CHECKPOINT_MARKER) && /^Owner: codex-flow\//mu.test(checkpointContent))) {
+      return;
+    }
+  } catch {
+    return;
+  }
+
+  fs.rmSync(checkpointPath, { force: true });
+  pruneEmptyParents(path.dirname(checkpointPath), targetRoot);
+}
+
+function restoreLauncherCheckpoint(targetRoot, backupRoot, launcherCheckpointState, options = {}) {
+  if (launcherCheckpointState === undefined) {
+    return null;
+  }
+
+  if (!launcherCheckpointState || launcherCheckpointState.hadPreexistingCheckpoint !== true) {
+    removeGeneratedLauncherCheckpoint(targetRoot, options);
+    return null;
+  }
+
+  const backupPath = getBackupPath(targetRoot, backupRoot, LAUNCHER_CHECKPOINT_RELATIVE_PATH);
+  if (!fs.existsSync(backupPath)) {
+    return LAUNCHER_CHECKPOINT_RELATIVE_PATH;
+  }
+
+  removeManagedFile(targetRoot, LAUNCHER_CHECKPOINT_RELATIVE_PATH, options);
+  if (!restoreFileFromBackup(targetRoot, backupRoot, LAUNCHER_CHECKPOINT_RELATIVE_PATH, options)) {
+    return LAUNCHER_CHECKPOINT_RELATIVE_PATH;
+  }
+
+  return null;
+}
+
+function restoreLauncherArtifacts(targetRoot, backupRoot, launcherArtifactState, options = {}) {
+  if (launcherArtifactState === undefined) {
+    return null;
+  }
+
+  if (!launcherArtifactState || launcherArtifactState.hadPreexistingArtifacts !== true) {
+    removeGeneratedLauncherArtifacts(targetRoot, options);
+    return null;
+  }
+
+  const backupPath = getBackupPath(targetRoot, backupRoot, LAUNCHER_ARTIFACTS_RELATIVE_PATH);
+  if (!fs.existsSync(backupPath)) {
+    return LAUNCHER_ARTIFACTS_RELATIVE_PATH;
+  }
+
+  const launcherArtifactsPath = resolveRelativePath(targetRoot, LAUNCHER_ARTIFACTS_RELATIVE_PATH, options);
+  ensureExistingPathResolvesInsideTargetRoot(targetRoot, launcherArtifactsPath);
+  fs.rmSync(launcherArtifactsPath, { recursive: true, force: true });
+  fs.mkdirSync(path.dirname(launcherArtifactsPath), { recursive: true });
+  fs.cpSync(backupPath, launcherArtifactsPath, { recursive: true, force: true });
+  return null;
 }
 
 function getRealPath(targetPath) {
@@ -242,6 +328,68 @@ function ensureBackupOfFile(targetRoot, backupRoot, targetPath, backupFiles, sta
   addBackupFile(backupFiles, relativePath, stateRef);
 }
 
+function ensureBackupOfDirectory(targetRoot, backupRoot, relativePath) {
+  const targetPath = resolveRelativePath(targetRoot, relativePath);
+
+  if (!fs.existsSync(targetPath) || !fs.statSync(targetPath).isDirectory()) {
+    return false;
+  }
+
+  ensureExistingPathResolvesInsideTargetRoot(targetRoot, targetPath);
+
+  const backupPath = getBackupPath(targetRoot, backupRoot, relativePath);
+  if (fs.existsSync(backupPath)) {
+    return true;
+  }
+
+  fs.mkdirSync(path.dirname(backupPath), { recursive: true });
+  fs.cpSync(targetPath, backupPath, { recursive: true, force: true });
+  return true;
+}
+
+function collectLauncherArtifactState(targetRoot, backupRoot) {
+  const launcherArtifactsPath = resolveRelativePath(targetRoot, LAUNCHER_ARTIFACTS_RELATIVE_PATH);
+
+  if (!fs.existsSync(launcherArtifactsPath)) {
+    return {
+      hadPreexistingArtifacts: false,
+    };
+  }
+
+  ensureExistingPathResolvesInsideTargetRoot(targetRoot, launcherArtifactsPath);
+
+  if (!fs.statSync(launcherArtifactsPath).isDirectory()) {
+    throw new Error(`launcher artifact root must be a directory: ${launcherArtifactsPath}`);
+  }
+
+  return {
+    hadPreexistingArtifacts: ensureBackupOfDirectory(targetRoot, backupRoot, LAUNCHER_ARTIFACTS_RELATIVE_PATH),
+  };
+}
+
+function collectLauncherCheckpointState(targetRoot, backupRoot, backupFiles, stateRef = null) {
+  const checkpointPath = resolveRelativePath(targetRoot, LAUNCHER_CHECKPOINT_RELATIVE_PATH);
+
+  if (!fs.existsSync(checkpointPath)) {
+    return {
+      hadPreexistingCheckpoint: false,
+    };
+  }
+
+  ensureExistingPathResolvesInsideTargetRoot(targetRoot, checkpointPath);
+
+  if (!fs.statSync(checkpointPath).isFile()) {
+    return {
+      hadPreexistingCheckpoint: false,
+    };
+  }
+
+  ensureBackupOfFile(targetRoot, backupRoot, checkpointPath, backupFiles, stateRef);
+  return {
+    hadPreexistingCheckpoint: true,
+  };
+}
+
 function resolveTarget(repoRoot, rawTarget) {
   if (!rawTarget) {
     throw new Error('target argument is required');
@@ -297,7 +445,7 @@ function ensurePathInsideTargetRoot(targetRoot, targetPath, options = {}) {
   }
 
   let probePath = resolvedTargetPath;
-  while (!fs.existsSync(probePath)) {
+  while (!pathEntryExists(probePath)) {
     const parentPath = path.dirname(probePath);
     if (parentPath === probePath) {
       break;
@@ -305,13 +453,29 @@ function ensurePathInsideTargetRoot(targetRoot, targetPath, options = {}) {
     probePath = parentPath;
   }
 
-  const realProbePath = fs.realpathSync.native(probePath);
-  if (realProbePath !== realTargetRoot && !realProbePath.startsWith(`${realTargetRoot}${path.sep}`)) {
-    throw new Error(`refusing to write outside the target root: ${targetPath}`);
-  }
-
   if (!options.allowManagedRedirects) {
     ensureManagedPathUsesCanonicalLocation(targetRoot, resolvedTargetPath);
+  }
+
+  const probeLinkTarget = getLinkTargetPath(probePath);
+  if (probeLinkTarget) {
+    const resolvedLinkTarget = path.resolve(probeLinkTarget);
+    if (resolvedLinkTarget !== resolvedTargetRoot && !resolvedLinkTarget.startsWith(`${resolvedTargetRoot}${path.sep}`)) {
+      throw new Error(`refusing to write outside the target root: ${targetPath}`);
+    }
+
+    return;
+  }
+
+  let realProbePath = null;
+  try {
+    realProbePath = fs.realpathSync.native(probePath);
+  } catch {
+    throw new Error(`refusing to access redirected managed path: ${targetPath}`);
+  }
+
+  if (realProbePath !== realTargetRoot && !realProbePath.startsWith(`${realTargetRoot}${path.sep}`)) {
+    throw new Error(`refusing to write outside the target root: ${targetPath}`);
   }
 }
 
@@ -605,7 +769,10 @@ function getAllowedManagedPrefixes() {
 
 function isManagedInstallPath(relativePath) {
   const normalizedPath = normalizeRelativePath(relativePath);
-  if (normalizedPath === 'package.json' || normalizedPath === 'node_modules' || LOCKFILE_NAMES.includes(normalizedPath)) {
+  if (normalizedPath === 'package.json'
+    || normalizedPath === 'node_modules'
+    || normalizedPath === LAUNCHER_CHECKPOINT_RELATIVE_PATH
+    || LOCKFILE_NAMES.includes(normalizedPath)) {
     return true;
   }
 
@@ -643,6 +810,26 @@ function validateInstallState(state) {
 
   if (state.preservedDirectories !== undefined && !Array.isArray(state.preservedDirectories)) {
     return false;
+  }
+
+  if (state.launcherArtifactState !== undefined) {
+    if (!state.launcherArtifactState || typeof state.launcherArtifactState !== 'object') {
+      return false;
+    }
+
+    if (typeof state.launcherArtifactState.hadPreexistingArtifacts !== 'boolean') {
+      return false;
+    }
+  }
+
+  if (state.launcherCheckpointState !== undefined) {
+    if (!state.launcherCheckpointState || typeof state.launcherCheckpointState !== 'object') {
+      return false;
+    }
+
+    if (typeof state.launcherCheckpointState.hadPreexistingCheckpoint !== 'boolean') {
+      return false;
+    }
   }
 
   if (state.dependencyState !== null && state.dependencyState !== undefined) {
@@ -843,6 +1030,24 @@ function restoreProjectFromState(targetRoot, state, options = {}) {
   }
 
   restoreErrors.push(...restoreDependencyArtifacts(targetRoot, backupRoot, state.dependencyState, restorePathOptions));
+  const launcherArtifactRestoreError = restoreLauncherArtifacts(
+    targetRoot,
+    backupRoot,
+    state.launcherArtifactState,
+    restorePathOptions
+  );
+  if (launcherArtifactRestoreError) {
+    restoreErrors.push(launcherArtifactRestoreError);
+  }
+  const launcherCheckpointRestoreError = restoreLauncherCheckpoint(
+    targetRoot,
+    backupRoot,
+    state.launcherCheckpointState,
+    restorePathOptions
+  );
+  if (launcherCheckpointRestoreError) {
+    restoreErrors.push(launcherCheckpointRestoreError);
+  }
 
   if (restoreErrors.length > 0) {
     throw new Error(`Missing installer backups for: ${restoreErrors.join(', ')}`);
@@ -984,6 +1189,8 @@ function installProject(targetRoot) {
     copiedFiles: [],
     backupFiles: [],
     preservedDirectories: [],
+    launcherArtifactState: undefined,
+    launcherCheckpointState: undefined,
     dependencyState: null,
   };
 
@@ -999,6 +1206,16 @@ function installProject(targetRoot) {
     if (process.env.EGCOPILOT_SKIP_DEP_INSTALL !== '1' && !dependencyPlan.canInstall) {
       throw new Error(dependencyPlan.packageJsonParseError);
     }
+
+    transientState.launcherArtifactState = collectLauncherArtifactState(targetRoot, backupRoot);
+
+    const launcherCheckpointBackupFiles = new Set(transientState.backupFiles);
+    transientState.launcherCheckpointState = collectLauncherCheckpointState(
+      targetRoot,
+      backupRoot,
+      launcherCheckpointBackupFiles,
+      transientState
+    );
 
     const payload = copyProjectPayload(repoRoot, targetRoot, backupRoot, transientState);
     const skillsBridge = ensureSkillsJunction(targetRoot, backupRoot, transientState, preexistingDirectories);

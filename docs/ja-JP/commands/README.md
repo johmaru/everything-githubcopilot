@@ -1,6 +1,8 @@
 # コマンド
 
-このリポジトリのユーザー向け command surface は、`.github/prompts/*.prompt.md` にある slash prompt です。VS Code の Copilot Chat で `/command-name` と入力して起動します。
+VS Code の Copilot Chat におけるユーザー向け command surface は、`.github/prompts/*.prompt.md` にある slash prompt です。VS Code の Copilot Chat で `/command-name` と入力して起動します。
+
+Codex CLI では別の shipped surface があり、project setup 後の target project で `node scripts/codex-flow.js "<task>"` を実行します。これは project-local な external orchestrator で、`plan -> implement -> review` を順に回します。常駐 watcher は shipped せず、軽い follow-up lane として `--resume-latest` と `--review-latest` を使います。
 
 ## アクティブなコマンドカテゴリ
 
@@ -43,6 +45,20 @@ VS Code の Copilot Chat で実行します:
 /verify
 /knowledge-audit
 ```
+
+## Codex CLI の起動
+
+project setup 後の target project で実行します:
+
+```bash
+node scripts/codex-flow.js "add a codex-only launcher"
+node scripts/codex-flow.js --resume-latest
+node scripts/codex-flow.js --review-latest
+```
+
+artifact は `.github/sessions/codex-flow/` に保存されます。
+
+`--resume-latest` は最新 run の未完了 phase から再開し、`--review-latest` は review だけを再実行します。active phase の handoff は artifact root 配下に残り、`.github/sessions/checkpoint.md` は phase 実行中だけの一時 bridge として使われます。
 
 ## よく使うフロー
 

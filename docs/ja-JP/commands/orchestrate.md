@@ -8,6 +8,8 @@
 
 このドキュメントは `planner -> coder -> researcher` という標準レーンを定義するものです。Codex CLI では custom agent registry がビルドによって stable な picker として露出しない場合があるため、Codex 単独で同じ UI/UX を前提にしないでください。
 
+- shipped な Codex-only front door としては、project setup 後の `node scripts/codex-flow.js "<task>"` を使います。これは external orchestrator として `plan -> implement -> review` を順に回し、artifact を `.github/sessions/codex-flow/` に保存します。
+- 低オーバーヘッドな追従レーンとして、`node scripts/codex-flow.js --resume-latest` は最新 run の未完了 phase から再開し、`node scripts/codex-flow.js --review-latest` は review だけを再実行します。phase handoff は artifact root に残り、`.github/sessions/checkpoint.md` は phase 実行中だけの一時 bridge として使われます。
 - Codex の named agent spawn が実ビルドで確認できた場合だけ、Codex 側で直接 delegation を使います。
 - それ以外では Copilot か外部オーケストレータが phase と handoff を管理し、Codex は worker として参加させます。
 - 単一スレッドで role prompt を切り替えるだけの代用は、このレーンの正式な代替として扱いません。

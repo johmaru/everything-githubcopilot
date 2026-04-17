@@ -4,6 +4,7 @@ const os = require('os');
 const path = require('path');
 const { execFileSync } = require('child_process');
 
+const codexFlow = require('../../scripts/installer/codex-flow');
 const { getProjectInstallManifest } = require('../../scripts/installer/manifest');
 const projectSetup = require('../../scripts/installer/project-setup');
 
@@ -302,9 +303,41 @@ results.push(test('project setup rejects symlink or junction escapes inside the 
     const error = runProjectSetupFailure(targetDir);
 
     assert.notStrictEqual(error.status, 0, 'setup should fail when a child path escapes the target root');
-    assert.ok((error.stderr || '').includes('outside the target root'), 'failure should explain the escaped child path');
+    assert.ok(
+      (error.stderr || '').includes('outside the target root') || (error.stderr || '').includes('redirected managed path'),
+      'failure should explain the escaped child path'
+    );
     assert.deepStrictEqual(fs.readdirSync(escapedDir), [], 'escaped directories should stay untouched when setup is rejected');
     assert.deepStrictEqual(fs.readdirSync(targetDir), ['.github'], 'setup should not partially populate the target after rejecting an escaped child path');
+  } finally {
+    cleanupTestDir(targetDir);
+    cleanupTestDir(escapedDir);
+  }
+}));
+
+results.push(test('project setup rejects broken managed leaf symlinks that point outside the target root', () => {
+  const targetDir = createTestDir('egc-project-setup-');
+  const escapedDir = createTestDir('egc-project-setup-escape-');
+  const linkedLauncher = path.join(targetDir, 'scripts', 'codex-flow.js');
+  const escapedLauncher = path.join(escapedDir, 'missing-launcher.js');
+
+  try {
+    fs.mkdirSync(path.dirname(linkedLauncher), { recursive: true });
+
+    try {
+      fs.symlinkSync(escapedLauncher, linkedLauncher, 'file');
+    } catch {
+      return;
+    }
+
+    const error = runProjectSetupFailure(targetDir);
+
+    assert.notStrictEqual(error.status, 0, 'setup should fail when a managed leaf symlink points outside the target root');
+    assert.ok(
+      (error.stderr || '').includes('redirected managed path') || (error.stderr || '').includes('outside the target root'),
+      'failure should explain the redirected managed path rejection'
+    );
+    assert.deepStrictEqual(fs.readdirSync(escapedDir), [], 'escaped leaf targets should stay untouched when setup is rejected');
   } finally {
     cleanupTestDir(targetDir);
     cleanupTestDir(escapedDir);
@@ -431,7 +464,10 @@ results.push(test('project setup rejects .agents junction escapes inside the tar
     const error = runProjectSetupFailure(targetDir);
 
     assert.notStrictEqual(error.status, 0, 'setup should fail when .agents escapes the target root');
-    assert.ok((error.stderr || '').includes('outside the target root'), 'failure should explain the escaped .agents path');
+    assert.ok(
+      (error.stderr || '').includes('outside the target root') || (error.stderr || '').includes('redirected managed path'),
+      'failure should explain the escaped .agents path'
+    );
     assert.deepStrictEqual(fs.readdirSync(escapedDir), [], 'escaped .agents directories should stay untouched when setup is rejected');
   } finally {
     cleanupTestDir(targetDir);
@@ -465,6 +501,212 @@ results.push(test('project uninstall restores overwritten files and removes file
     assert.strictEqual(fs.readFileSync(customCopilotInstructions, 'utf8'), '# custom instructions\n', 'uninstall should restore overwritten files');
     assert.strictEqual(fs.readFileSync(customAgents, 'utf8'), '# custom agents\n', 'uninstall should restore overwritten files');
     assert.strictEqual(fs.existsSync(path.join(targetDir, '.github', 'instructions', 'common-agents.instructions.md')), false, 'uninstall should remove files created by the installer');
+  } finally {
+    cleanupTestDir(targetDir);
+  }
+}));
+
+results.push(test('project uninstall restores a preexisting scripts/codex-flow.js after project setup overwrites it', () => {
+  const targetDir = createTestDir('egc-project-setup-');
+  const customLauncher = path.join(targetDir, 'scripts', 'codex-flow.js');
+  const originalLauncher = '#!/usr/bin/env node\nconsole.log("custom launcher");\n';
+
+  try {
+    fs.mkdirSync(path.dirname(customLauncher), { recursive: true });
+    fs.writeFileSync(customLauncher, originalLauncher);
+
+    runProjectSetup(targetDir);
+
+    assert.notStrictEqual(
+      fs.readFileSync(customLauncher, 'utf8'),
+      originalLauncher,
+      'project setup should replace the preexisting launcher with the shipped version'
+    );
+
+    runProjectInstaller('uninstall', targetDir);
+
+    assert.strictEqual(
+      fs.readFileSync(customLauncher, 'utf8'),
+      originalLauncher,
+      'project uninstall should restore the original launcher content'
+    );
+  } finally {
+    cleanupTestDir(targetDir);
+  }
+}));
+
+results.push(test('project uninstall removes runtime launcher artifacts under .github/sessions/codex-flow', () => {
+  const targetDir = createTestDir('egc-project-setup-');
+  const launcherArtifactsDir = path.join(targetDir, '.github', 'sessions', 'codex-flow');
+
+  try {
+    runProjectSetup(targetDir);
+
+    codexFlow.runFlow('Add a launcher command', {
+      cwd: targetDir,
+      runId: 'runtime-artifacts',
+      execFileSync() {
+        return 'phase output';
+      },
+    });
+
+    assert.ok(
+      fs.existsSync(path.join(launcherArtifactsDir, 'runtime-artifacts', 'run.json')),
+      'launcher should create runtime artifacts inside the project sessions surface'
+    );
+
+    runProjectInstaller('uninstall', targetDir);
+
+    assert.strictEqual(
+      fs.existsSync(launcherArtifactsDir),
+      false,
+      'project uninstall should remove launcher runtime artifacts'
+    );
+  } finally {
+    cleanupTestDir(targetDir);
+  }
+}));
+
+results.push(test('project uninstall removes a leftover launcher-owned transient checkpoint bridge', () => {
+  const targetDir = createTestDir('egc-project-setup-');
+  const checkpointFile = path.join(targetDir, '.github', 'sessions', 'checkpoint.md');
+
+  try {
+    runProjectSetup(targetDir);
+
+    fs.mkdirSync(path.dirname(checkpointFile), { recursive: true });
+    fs.writeFileSync(checkpointFile, [
+      '# Checkpoint Resume',
+      '',
+      'X-Codex-Flow-Checkpoint: 1',
+      'Owner: codex-flow/runtime-artifacts/implement/owner-token',
+      'Restore-Mode: delete',
+    ].join('\n'));
+
+    runProjectInstaller('uninstall', targetDir);
+
+    assert.strictEqual(
+      fs.existsSync(checkpointFile),
+      false,
+      'project uninstall should remove leftover launcher-owned transient checkpoints'
+    );
+  } finally {
+    cleanupTestDir(targetDir);
+  }
+}));
+
+results.push(test('project uninstall restores a preexisting launcher-owned checkpoint that existed before setup', () => {
+  const targetDir = createTestDir('egc-project-setup-');
+  const checkpointFile = path.join(targetDir, '.github', 'sessions', 'checkpoint.md');
+  const originalCheckpoint = [
+    '# Checkpoint Resume',
+    '',
+    'X-Codex-Flow-Checkpoint: 1',
+    'Owner: codex-flow/preexisting/review/original-owner',
+    'Restore-Mode: delete',
+  ].join('\n');
+
+  try {
+    fs.mkdirSync(path.dirname(checkpointFile), { recursive: true });
+    fs.writeFileSync(checkpointFile, originalCheckpoint);
+
+    runProjectSetup(targetDir);
+    runProjectInstaller('uninstall', targetDir);
+
+    assert.strictEqual(
+      fs.readFileSync(checkpointFile, 'utf8'),
+      originalCheckpoint,
+      'project uninstall should restore checkpoint content that existed before setup'
+    );
+  } finally {
+    cleanupTestDir(targetDir);
+  }
+}));
+
+results.push(test('project uninstall preserves non-launcher checkpoints that merely mention the marker text', () => {
+  const targetDir = createTestDir('egc-project-setup-');
+  const checkpointFile = path.join(targetDir, '.github', 'sessions', 'checkpoint.md');
+  const userCheckpoint = [
+    '# User Checkpoint',
+    '',
+    'X-Codex-Flow-Checkpoint: 1',
+    'This is documentation, not a launcher-owned checkpoint.',
+  ].join('\n');
+
+  try {
+    runProjectSetup(targetDir);
+
+    fs.mkdirSync(path.dirname(checkpointFile), { recursive: true });
+    fs.writeFileSync(checkpointFile, userCheckpoint);
+
+    runProjectInstaller('uninstall', targetDir);
+
+    assert.strictEqual(
+      fs.readFileSync(checkpointFile, 'utf8'),
+      userCheckpoint,
+      'project uninstall should not delete non-launcher checkpoints that only mention the marker text'
+    );
+  } finally {
+    cleanupTestDir(targetDir);
+  }
+}));
+
+results.push(test('project uninstall restores preexisting runtime launcher artifacts after removing generated sessions', () => {
+  const targetDir = createTestDir('egc-project-setup-');
+  const launcherArtifactsDir = path.join(targetDir, '.github', 'sessions', 'codex-flow');
+  const preexistingArtifact = path.join(launcherArtifactsDir, 'preexisting.txt');
+
+  try {
+    fs.mkdirSync(launcherArtifactsDir, { recursive: true });
+    fs.writeFileSync(preexistingArtifact, 'keep me\n');
+
+    runProjectSetup(targetDir);
+
+    codexFlow.runFlow('Add a launcher command', {
+      cwd: targetDir,
+      runId: 'runtime-artifacts',
+      execFileSync() {
+        return 'phase output';
+      },
+    });
+
+    runProjectInstaller('uninstall', targetDir);
+
+    assert.strictEqual(
+      fs.readFileSync(preexistingArtifact, 'utf8'),
+      'keep me\n',
+      'project uninstall should restore preexisting launcher artifacts'
+    );
+    assert.strictEqual(
+      fs.existsSync(path.join(launcherArtifactsDir, 'runtime-artifacts')),
+      false,
+      'project uninstall should remove generated launcher session artifacts'
+    );
+  } finally {
+    cleanupTestDir(targetDir);
+  }
+}));
+
+results.push(test('project setup rejects a preexisting non-directory launcher artifact root', () => {
+  const targetDir = createTestDir('egc-project-setup-');
+  const launcherArtifactsPath = path.join(targetDir, '.github', 'sessions', 'codex-flow');
+
+  try {
+    fs.mkdirSync(path.dirname(launcherArtifactsPath), { recursive: true });
+    fs.writeFileSync(launcherArtifactsPath, 'not a directory\n');
+
+    const error = runProjectSetupFailure(targetDir);
+
+    assert.notStrictEqual(error.status, 0, 'setup should fail when the launcher artifact root is not a directory');
+    assert.ok(
+      (error.stderr || '').includes('launcher artifact root') || (error.stderr || '').includes('not a directory'),
+      'failure should explain the unexpected launcher artifact root'
+    );
+    assert.strictEqual(
+      fs.readFileSync(launcherArtifactsPath, 'utf8'),
+      'not a directory\n',
+      'setup failure must preserve the preexisting launcher artifact root'
+    );
   } finally {
     cleanupTestDir(targetDir);
   }

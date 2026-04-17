@@ -65,6 +65,7 @@ results.push(test('project install manifest includes the current shipped project
   const manifest = getProjectInstallManifest();
   const sources = manifest.copyOperations.map(operation => operation.src).sort();
   const instructionsOperation = manifest.copyOperations.find(operation => operation.src === '.github/instructions');
+  const codexFlowOperation = manifest.copyOperations.find(operation => operation.src === 'scripts/installer/codex-flow.js');
 
   assert.deepStrictEqual(sources, [
     '.codex',
@@ -81,9 +82,12 @@ results.push(test('project install manifest includes the current shipped project
     'schemas',
     'scripts/ci',
     'scripts/hooks',
+    'scripts/installer/codex-flow.js',
     'tests/fixtures',
   ]);
   assert.strictEqual(instructionsOperation.recursive, true);
+  assert.strictEqual(codexFlowOperation.dst, 'scripts/codex-flow.js');
+  assert.strictEqual(codexFlowOperation.single, true);
   assert.deepStrictEqual(manifest.managedPaths, ['.agents/skills']);
 }));
 

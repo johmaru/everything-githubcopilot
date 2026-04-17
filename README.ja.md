@@ -57,9 +57,13 @@ npm run lint
 
 ## 自分のプロジェクトにインストール
 
-すべての Copilot カスタマイズを shared project payload として任意のプロジェクトへコピーします。`.github/` 一式、`.github/workflows/`、`AGENTS.md`、`schemas/`、`scripts/ci/`、`scripts/hooks/`、`tests/fixtures/`、`rust/semantic-indexer/`、そして `.vscode/settings.json` が未作成ならその設定も同期します。既存の `.vscode/settings.json` は上書きせず、警告だけを出して保持します。
+すべての Copilot カスタマイズを shared project payload として任意のプロジェクトへコピーします。`.github/` 一式、`.github/workflows/`、`AGENTS.md`、`.codex/`、`schemas/`、`scripts/codex-flow.js`、`scripts/ci/`、`scripts/hooks/`、`tests/fixtures/`、`rust/semantic-indexer/`、そして `.vscode/settings.json` が未作成ならその設定も同期します。既存の `.vscode/settings.json` は上書きせず、警告だけを出して保持します。
 
 Codex CLI 向けには、project setup が project-local な `.codex/` runtime assets を配布し、`.github/skills/` を Codex から見せるための `.agents/skills/` ブリッジ作成も試みます。Codex は project instructions として root の `AGENTS.md` を読み続けます。`.codex/AGENTS.md` は shipped な Codex surface 向けの互換メモとして扱われます。
+
+project setup 後は、target project で `node scripts/codex-flow.js "<task>"` を実行すると、external orchestrator として `plan -> implement -> review` を順に回します。phase artifact は `.github/sessions/codex-flow/` に保存されます。
+
+低オーバーヘッドな追従フローとして、同じ launcher で `node scripts/codex-flow.js --resume-latest` を使うと最新 run の未完了 phase から再開でき、`node scripts/codex-flow.js --review-latest` を使うと review phase だけを再実行できます。軽量な handoff file は同じ artifact root に保存され、`.github/sessions/checkpoint.md` は phase 実行中だけの一時 bridge として使います。常駐 watcher は shipped しません。
 
 runtime 依存は target project から検出できる package manager (`packageManager`, `pnpm-lock.yaml`, `yarn.lock`, `package-lock.json`, `bun.lockb` / `bun.lock`) を優先して導入し、見つからない時だけ `npm` にフォールバックします。同梱する依存は `@huggingface/transformers`, `ajv`, `better-sqlite3`, `sqlite-vec` です。
 
@@ -141,6 +145,16 @@ installer は未公開の Autopilot 設定や default approvals、allowed tools 
   rules/                           # Codex execution policy rules
 
 .agents/skills/                    # project setup が作成する Codex skill bridge
+
+scripts/codex-flow.js              # project setup が配布する Codex-only launcher
+
+.vscode/
+  settings.json                    # VS Code workspace settings
+
+scripts/ci/
+  validate-copilot-customizations.js
+  validate-github-hooks.js
+  validate-no-personal-paths.js
 ```
 
 ---

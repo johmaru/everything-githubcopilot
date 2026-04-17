@@ -18,6 +18,8 @@ Codex should continue to use the root `AGENTS.md` for project instructions.
 - Codex expects skills at `.agents/skills/`, and project setup creates that bridge from `.github/skills/`
 - `.codex/` carries config, agent registrations, hooks, and rules
 - This repository does not ship runtime `.codex/instructions/`, `.codex/prompts/`, or `~/.codex/skills/` payloads
+- Project setup ships `scripts/codex-flow.js` as the supported external orchestrator for the canonical Codex-only lane
+- The launcher writes phase artifacts under `.github/sessions/codex-flow/`
 
 ## Skills Discovery
 
@@ -122,7 +124,7 @@ Agent registration in `.codex/config.toml` is a compatibility surface, not a gua
 
 ### Recommended operation order
 
-1. Prefer an external orchestrator or prompt-driven control plane for the canonical `planner -> coder -> researcher` lane.
+1. Prefer the shipped project-local launcher `node scripts/codex-flow.js "<task>"` or another external orchestrator for the canonical `planner -> coder -> researcher` lane.
 2. Use Codex native named-agent delegation only when your current build can spawn the named agent without falling back to a generic worker.
 3. If named delegation is unavailable, keep the phase boundary outside Codex and use Codex as a worker for the phases it handles well.
 

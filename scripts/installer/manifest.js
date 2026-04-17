@@ -67,6 +67,7 @@ function getProjectInstallManifest() {
       { src: '.github/skills', dst: '.github/skills', recursive: true },
       { src: 'scripts/hooks', dst: 'scripts/hooks', pattern: '*.js' },
       { src: 'scripts/ci', dst: 'scripts/ci', pattern: '*.js' },
+      { src: 'scripts/installer/codex-flow.js', dst: 'scripts/codex-flow.js', single: true },
       { src: 'schemas', dst: 'schemas', pattern: '*.json' },
       { src: '.vscode/settings.json', dst: '.vscode/settings.json', single: true, skipIfExists: true },
       { src: 'AGENTS.md', dst: 'AGENTS.md', single: true },

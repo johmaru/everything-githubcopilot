@@ -97,9 +97,13 @@ Copy all Copilot customizations (instructions, prompts, agents, hooks, skills) i
 
 An explicit target path is required, and it must be outside the source checkout. The setup wrappers no longer fall back to the parent directory of the source repository.
 
-This copies the shared project payload into the target project: `.github/` assets, `.github/workflows/`, `.vscode/settings.json` when absent, `AGENTS.md`, `.codex/` (Codex CLI compatibility surface), `schemas/`, `scripts/ci/`, `scripts/hooks/`, `tests/fixtures/`, and `rust/semantic-indexer/`. It preserves an existing `.vscode/settings.json` with a warning instead of overwriting it.
+This copies the shared project payload into the target project: `.github/` assets, `.github/workflows/`, `.vscode/settings.json` when absent, `AGENTS.md`, `.codex/` (Codex CLI compatibility surface), `schemas/`, `scripts/codex-flow.js`, `scripts/ci/`, `scripts/hooks/`, `tests/fixtures/`, and `rust/semantic-indexer/`. It preserves an existing `.vscode/settings.json` with a warning instead of overwriting it.
 
 For Codex CLI, project setup also installs the project-local `.codex/` runtime assets and attempts to create `.agents/skills/` as the bridge from `.github/skills/` into Codex skill discovery. Codex continues to read the root `AGENTS.md` for project instructions, while `.codex/AGENTS.md` remains compatibility notes for the shipped Codex surface.
+
+After project setup, the supported Codex-only front door is `node scripts/codex-flow.js "<task>"` from the target project. The launcher acts as the external `plan -> implement -> review` orchestrator and writes phase artifacts under `.github/sessions/codex-flow/`.
+
+For lower-overhead follow-up work, the same launcher also supports `node scripts/codex-flow.js --resume-latest` to continue the first incomplete phase of the latest run and `node scripts/codex-flow.js --review-latest` to rerun only the review phase. It writes lightweight handoff files under the same artifact root and uses `.github/sessions/checkpoint.md` only as a transient bridge while a phase is actively running instead of shipping an always-on watcher.
 
 Runtime dependencies now install from the target project's package manager when setup can detect one (`packageManager`, `pnpm-lock.yaml`, `yarn.lock`, `package-lock.json`, or `bun.lockb` / `bun.lock`), and fall back to `npm` otherwise. The bundled runtime set is `@huggingface/transformers`, `ajv`, `better-sqlite3`, and `sqlite-vec`.
 
@@ -153,6 +157,8 @@ The installer intentionally does not invent unsupported Autopilot, default-appro
 
 ### 5. Use
 
+- **Codex-only launcher:** after project setup, run `node scripts/codex-flow.js "<task>"` in the target project to execute the external `plan -> implement -> review` lane and store the phase artifacts under `.github/sessions/codex-flow/`
+- **Codex incremental follow-up:** use `node scripts/codex-flow.js --resume-latest` to continue the first incomplete phase of the latest run, or `node scripts/codex-flow.js --review-latest` to rerun only the review phase when the latest run has already completed plan and implement
 - **Prompts:** `/plan`, `/plan-and-implement`, `/architect`, `/tdd`, `/code-review`, `/review`, `/build-fix`, `/fix-test`, `/docs`, `/e2e`, `/refactor-clean`, `/research-plan`, `/checkpoint`, `/evolve`, `/learn`, `/verify`, `/knowledge-audit`
 - **Verification:** `/verify` reruns the repository verification loop on the current change set and reports regressions or remaining risks without changing files by default
 - **Knowledge audit:** `/knowledge-audit` checks instructions, skills, prompts, and agents for staleness, contradictions, duplication, or coverage gaps
@@ -195,6 +201,8 @@ The installer intentionally does not invent unsupported Autopilot, default-appro
   rules/                           # Codex execution policy rules
 
 .agents/skills/                    # Project-local Codex skill bridge created by setup
+
+scripts/codex-flow.js              # Project-local Codex-only external orchestrator
 
 .vscode/
   settings.json                    # VS Code workspace settings

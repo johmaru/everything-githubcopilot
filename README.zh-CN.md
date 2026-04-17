@@ -57,9 +57,13 @@ npm run lint
 
 ## 安装到您的项目
 
-将所有 Copilot 自定义作为 shared project payload 复制到任意项目：`.github/`、`.github/workflows/`、`AGENTS.md`、`schemas/`、`scripts/ci/`、`scripts/hooks/`、`tests/fixtures/`、`rust/semantic-indexer/`，以及在目标项目尚未存在时复制 `.vscode/settings.json`。如果目标项目已经有 `.vscode/settings.json`，安装器会给出警告并保留原文件。
+将所有 Copilot 自定义作为 shared project payload 复制到任意项目：`.github/`、`.github/workflows/`、`AGENTS.md`、`.codex/`、`schemas/`、`scripts/codex-flow.js`、`scripts/ci/`、`scripts/hooks/`、`tests/fixtures/`、`rust/semantic-indexer/`，以及在目标项目尚未存在时复制 `.vscode/settings.json`。如果目标项目已经有 `.vscode/settings.json`，安装器会给出警告并保留原文件。
 
 对于 Codex CLI，project setup 还会分发 project-local 的 `.codex/` runtime assets，并尝试创建 `.agents/skills/`，把 `.github/skills/` 作为 Codex skill discovery 的桥接目录。Codex 会继续读取根目录 `AGENTS.md` 作为项目 instructions，而 `.codex/AGENTS.md` 只保留为随仓库分发的 Codex 兼容说明。
+
+完成 project setup 后，可在目标项目中运行 `node scripts/codex-flow.js "<task>"`。这个 external orchestrator 会按顺序执行 `plan -> implement -> review`，并把 phase artifact 写入 `.github/sessions/codex-flow/`。
+
+为了在不增加常驻开销的前提下接近 Copilot 的续跑体验，同一个 launcher 还支持 `node scripts/codex-flow.js --resume-latest` 来从最新 run 的第一个未完成 phase 继续执行，以及 `node scripts/codex-flow.js --review-latest` 来只重跑 review phase。轻量 handoff file 会保存在同一个 artifact root 下，而 `.github/sessions/checkpoint.md` 只会在 phase 实际运行期间作为临时 bridge 使用。
 
 runtime 依赖会优先跟随目标项目的 package manager (`packageManager`、`pnpm-lock.yaml`、`yarn.lock`、`package-lock.json`、`bun.lockb` / `bun.lock`)，找不到时才回退到 `npm`。当前依赖集合是 `@huggingface/transformers`、`ajv`、`better-sqlite3`、`sqlite-vec`。
 
@@ -139,6 +143,16 @@ npx everything-githubcopilot reinstall
   rules/                           # Codex execution policy rules
 
 .agents/skills/                    # project setup 创建的 Codex skill bridge
+
+scripts/codex-flow.js              # project setup 分发的 Codex-only launcher
+
+.vscode/
+  settings.json                    # VS Code workspace settings
+
+scripts/ci/
+  validate-copilot-customizations.js
+  validate-github-hooks.js
+  validate-no-personal-paths.js
 ```
 
 ---
