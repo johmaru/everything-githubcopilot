@@ -79,6 +79,79 @@ function extractFrontmatterBlock(content) {
   return match ? match[1] : null;
 }
 
+function isValidQuotedFrontmatterValue(value) {
+  if (value.startsWith('"')) {
+    return /^"(?:[^"\\]|\\(?:[0abtnvfre"/\\N_LP]|x[0-9A-Fa-f]{2}|u[0-9A-Fa-f]{4}|U[0-9A-Fa-f]{8}))*"(?:\s+#.*)?$/.test(value);
+  }
+
+  if (value.startsWith("'")) {
+    return /^'(?:[^']|'')*'(?:\s+#.*)?$/.test(value);
+  }
+
+  return false;
+}
+
+function findInvalidFrontmatterLine(content) {
+  const frontmatterBlock = extractFrontmatterBlock(content);
+  if (!frontmatterBlock) {
+    return null;
+  }
+
+  const lines = frontmatterBlock.split(/\r?\n/);
+  let withinBlockScalar = false;
+
+  for (const [index, line] of lines.entries()) {
+    const trimmedLine = line.trim();
+    if (!trimmedLine || trimmedLine.startsWith('#')) {
+      continue;
+    }
+
+    const indent = line.length - line.trimStart().length;
+    if (withinBlockScalar) {
+      if (indent > 0) {
+        continue;
+      }
+      withinBlockScalar = false;
+    }
+
+    if (indent > 0) {
+      continue;
+    }
+
+    const match = line.match(/^([A-Za-z0-9_-]+):(.*)$/);
+    if (!match) {
+      return index + 2;
+    }
+
+    const value = match[2].trim();
+    if (!value) {
+      continue;
+    }
+
+    if (value.startsWith('"') || value.startsWith("'")) {
+      if (!isValidQuotedFrontmatterValue(value)) {
+        return index + 2;
+      }
+      continue;
+    }
+
+    if (value.startsWith('[') || value.startsWith('{')) {
+      continue;
+    }
+
+    if (/^[>|][+-]?\d*$/.test(value)) {
+      withinBlockScalar = true;
+      continue;
+    }
+
+    if (/:\s/.test(value)) {
+      return index + 2;
+    }
+  }
+
+  return null;
+}
+
 function frontmatterHasListValue(content, key, expectedValue) {
   const frontmatterBlock = extractFrontmatterBlock(content);
   if (!frontmatterBlock) {
@@ -212,6 +285,13 @@ function validateSkills(files, errors) {
       errors.push(`ERROR: ${file} is missing YAML frontmatter`);
       continue;
     }
+
+    const invalidFrontmatterLine = findInvalidFrontmatterLine(content);
+    if (invalidFrontmatterLine !== null) {
+      errors.push(`ERROR: ${file} has invalid YAML frontmatter near line ${invalidFrontmatterLine}`);
+      continue;
+    }
+
     if (!frontmatter.name) {
       errors.push(`ERROR: ${file} is missing a name field`);
     }

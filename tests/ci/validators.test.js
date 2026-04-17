@@ -465,6 +465,121 @@ results.push(test('validate-copilot-customizations accepts skill with block-scal
   }
 }));
 
+results.push(test('validate-copilot-customizations accepts quoted skill frontmatter with inline comment', () => {
+  const testDir = createTestDir();
+  try {
+    writeMinimalRepoFixtures(testDir);
+    writeSkill(path.join(testDir, '.github', 'skills', 'valid-skill', 'SKILL.md'), [
+      'name: valid-skill',
+      'description: "Valid skill description" # keep this context',
+    ]);
+
+    const result = runValidatorWithOverrides('validate-copilot-customizations', {
+      ROOT: testDir,
+      GITHUB_DIR: path.join(testDir, '.github'),
+      COPILOT_INSTRUCTIONS: path.join(testDir, '.github', 'copilot-instructions.md'),
+      INSTRUCTIONS_DIR: path.join(testDir, '.github', 'instructions'),
+      PROMPTS_DIR: path.join(testDir, '.github', 'prompts'),
+      AGENTS_DIR: path.join(testDir, '.github', 'agents'),
+      SKILLS_DIR: path.join(testDir, '.github', 'skills'),
+    });
+
+    assert.strictEqual(result.code, 0, result.stderr);
+    assert.ok(result.stdout.includes('1 skills'));
+  } finally {
+    cleanupTestDir(testDir);
+  }
+}));
+
+results.push(test('validate-copilot-customizations fails on skill with unterminated quoted frontmatter', () => {
+  const testDir = createTestDir();
+  try {
+    writeMinimalRepoFixtures(testDir);
+    writeSkill(path.join(testDir, '.github', 'skills', 'broken-skill', 'SKILL.md'), [
+      'name: broken-skill',
+      'description: "Unterminated quoted description',
+    ]);
+
+    const result = runValidatorWithOverrides('validate-copilot-customizations', {
+      ROOT: testDir,
+      GITHUB_DIR: path.join(testDir, '.github'),
+      COPILOT_INSTRUCTIONS: path.join(testDir, '.github', 'copilot-instructions.md'),
+      INSTRUCTIONS_DIR: path.join(testDir, '.github', 'instructions'),
+      PROMPTS_DIR: path.join(testDir, '.github', 'prompts'),
+      AGENTS_DIR: path.join(testDir, '.github', 'agents'),
+      SKILLS_DIR: path.join(testDir, '.github', 'skills'),
+    });
+
+    assert.strictEqual(result.code, 1);
+    assert.ok(result.stderr.includes('broken-skill/SKILL.md'));
+    assert.ok(result.stderr.includes('invalid YAML frontmatter'));
+  } finally {
+    cleanupTestDir(testDir);
+  }
+}));
+
+results.push(test('validate-copilot-customizations fails on skill with invalid double-quoted escape', () => {
+  const testDir = createTestDir();
+  try {
+    writeMinimalRepoFixtures(testDir);
+    writeSkill(path.join(testDir, '.github', 'skills', 'broken-skill', 'SKILL.md'), [
+      'name: broken-skill',
+      'description: "Invalid escape \\q in description"',
+    ]);
+
+    const result = runValidatorWithOverrides('validate-copilot-customizations', {
+      ROOT: testDir,
+      GITHUB_DIR: path.join(testDir, '.github'),
+      COPILOT_INSTRUCTIONS: path.join(testDir, '.github', 'copilot-instructions.md'),
+      INSTRUCTIONS_DIR: path.join(testDir, '.github', 'instructions'),
+      PROMPTS_DIR: path.join(testDir, '.github', 'prompts'),
+      AGENTS_DIR: path.join(testDir, '.github', 'agents'),
+      SKILLS_DIR: path.join(testDir, '.github', 'skills'),
+    });
+
+    assert.strictEqual(result.code, 1);
+    assert.ok(result.stderr.includes('broken-skill/SKILL.md'));
+    assert.ok(result.stderr.includes('invalid YAML frontmatter'));
+  } finally {
+    cleanupTestDir(testDir);
+  }
+}));
+
+results.push(test('validate-copilot-customizations fails on skill with invalid YAML frontmatter even when mirror matches', () => {
+  const testDir = createTestDir();
+  try {
+    writeMinimalRepoFixtures(testDir);
+    writeCodexCompatibilitySurface(testDir, {
+      createSkillsBridge: true,
+    });
+    writeSkill(path.join(testDir, '.github', 'skills', 'broken-skill', 'SKILL.md'), [
+      'name: broken-skill',
+      'description: Invalid skill description: triggers YAML parse ambiguity',
+    ]);
+    writeSkill(path.join(testDir, '.agents', 'skills', 'broken-skill', 'SKILL.md'), [
+      'name: broken-skill',
+      'description: Invalid skill description: triggers YAML parse ambiguity',
+    ]);
+
+    const result = runValidatorWithOverrides('validate-copilot-customizations', {
+      ROOT: testDir,
+      GITHUB_DIR: path.join(testDir, '.github'),
+      COPILOT_INSTRUCTIONS: path.join(testDir, '.github', 'copilot-instructions.md'),
+      INSTRUCTIONS_DIR: path.join(testDir, '.github', 'instructions'),
+      PROMPTS_DIR: path.join(testDir, '.github', 'prompts'),
+      AGENTS_DIR: path.join(testDir, '.github', 'agents'),
+      SKILLS_DIR: path.join(testDir, '.github', 'skills'),
+      CODEX_SKILLS_MIRROR_DIR: path.join(testDir, '.agents', 'skills'),
+    });
+
+    assert.strictEqual(result.code, 1);
+    assert.ok(result.stderr.includes('broken-skill/SKILL.md'));
+    assert.ok(result.stderr.includes('invalid YAML frontmatter'));
+  } finally {
+    cleanupTestDir(testDir);
+  }
+}));
+
 results.push(test('validate-copilot-customizations requires internal agents to be non-invocable', () => {
   const testDir = createTestDir();
   try {
@@ -2107,6 +2222,9 @@ results.push(test('validate-copilot-customizations requires checked-in .agents/s
   const testDir = createTestDir();
   try {
     writeMinimalRepoFixtures(testDir);
+    writeCodexCompatibilitySurface(testDir, {
+      createSkillsBridge: true,
+    });
     writeSkill(path.join(testDir, '.github', 'skills', 'mirror-skill', 'SKILL.md'), [
       'name: mirror-skill',
       'description: mirrored source',
