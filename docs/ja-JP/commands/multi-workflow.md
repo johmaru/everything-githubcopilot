@@ -4,7 +4,9 @@
 
 品質ゲート、MCPサービス、マルチモデル連携を備えた構造化開発ワークフロー。
 
-## 使用方法
+これは外部 control plane 向けの reference guide であり、このリポジトリがそのまま shipped する slash prompt ではありません。実際の shipped command surface は `.github/prompts/*.prompt.md` です。
+
+## 参照構文
 
 ```bash
 /workflow <タスクの説明>
@@ -16,12 +18,17 @@
 - 品質ゲートを備えた構造化された6フェーズワークフロー
 - マルチモデル連携: Codex(バックエンド) + Gemini(フロントエンド) + Claude(オーケストレーション)
 - MCPサービス統合(ace-tool、オプション)による機能強化
+- Codex 側の custom agent UI が安定しない場合でも、phase orchestration を外部に置いたまま運用できる
+- 外部オーケストレータが担うのは phase routing と handoff control であり、検証ループ、review lane、validation commands、policy boundary は既存のリポジトリ規約を維持する
 
 ## 役割
 
 あなたは**オーケストレーター**として、マルチモデル協調システムを調整します(調査 → アイデア創出 → 計画 → 実装 → 最適化 → レビュー)。経験豊富な開発者向けに簡潔かつ専門的にコミュニケーションします。
 
+この文書は外部オーケストレータが Codex と Gemini を worker として呼ぶ互換ガイドです。以下の `.claude` wrapper と `ROLE_FILE` パスは repo の shipped runtime payload ではなく、外部 control plane の reference 例として扱ってください。手元の control plane に同等の wrapper や role prompt path がない場合は、その環境に合わせて置き換えてください。
+
 **連携モデル**:
+
 - **ace-tool MCP**(オプション) – コード取得 + プロンプト強化
 - **Codex** – バックエンドロジック、アルゴリズム、デバッグ(**バックエンドの権威、信頼できる**)
 - **Gemini** – フロントエンドUI/UX、ビジュアルデザイン(**フロントエンドエキスパート、バックエンドの意見は参考のみ**)
@@ -66,15 +73,16 @@ EOF",
 ```
 
 **モデルパラメータの注意事項**:
+
 - `{{GEMINI_MODEL_FLAG}}`: `--backend gemini`を使用する場合、`--gemini-model gemini-3-pro-preview`で置き換える(末尾のスペースに注意); codexの場合は空文字列を使用
 
 **ロールプロンプト**:
 
-| フェーズ | Codex | Gemini |
-|-------|-------|--------|
-| 分析 | `~/.claude/.ccg/prompts/codex/analyzer.md` | `~/.claude/.ccg/prompts/gemini/analyzer.md` |
-| 計画 | `~/.claude/.ccg/prompts/codex/architect.md` | `~/.claude/.ccg/prompts/gemini/architect.md` |
-| レビュー | `~/.claude/.ccg/prompts/codex/reviewer.md` | `~/.claude/.ccg/prompts/gemini/reviewer.md` |
+| フェーズ | Codex                                       | Gemini                                       |
+| -------- | ------------------------------------------- | -------------------------------------------- |
+| 分析     | `~/.claude/.ccg/prompts/codex/analyzer.md`  | `~/.claude/.ccg/prompts/gemini/analyzer.md`  |
+| 計画     | `~/.claude/.ccg/prompts/codex/architect.md` | `~/.claude/.ccg/prompts/gemini/architect.md` |
+| レビュー | `~/.claude/.ccg/prompts/codex/reviewer.md`  | `~/.claude/.ccg/prompts/gemini/reviewer.md`  |
 
 **セッション再利用**: 各呼び出しは`SESSION_ID: xxx`を返し、後続のフェーズでは`resume xxx`サブコマンドを使用します(注意: `resume`、`--resume`ではない)。
 
@@ -87,6 +95,7 @@ TaskOutput({ task_id: "<task_id>", block: true, timeout: 600000 })
 ```
 
 **重要**:
+
 - `timeout: 600000`を指定する必要があります。指定しないとデフォルトの30秒で早期タイムアウトが発生します。
 - 10分後もまだ完了していない場合、`TaskOutput`でポーリングを継続し、**プロセスを強制終了しない**。
 - タイムアウトにより待機がスキップされた場合、**`AskUserQuestion`を呼び出してユーザーに待機を継続するか、タスクを強制終了するかを尋ねる必要があります。直接強制終了しない。**
@@ -122,6 +131,7 @@ TaskOutput({ task_id: "<task_id>", block: true, timeout: 600000 })
 `[Mode: Ideation]` - マルチモデル並列分析:
 
 **並列呼び出し**(`run_in_background: true`):
+
 - Codex: アナライザープロンプトを使用、技術的な実現可能性、ソリューション、リスクを出力
 - Gemini: アナライザープロンプトを使用、UIの実現可能性、ソリューション、UX評価を出力
 
@@ -136,6 +146,7 @@ TaskOutput({ task_id: "<task_id>", block: true, timeout: 600000 })
 `[Mode: Plan]` - マルチモデル協調計画:
 
 **並列呼び出し**(`resume <SESSION_ID>`でセッションを再開):
+
 - Codex: アーキテクトプロンプト + `resume $CODEX_SESSION`を使用、バックエンドアーキテクチャを出力
 - Gemini: アーキテクトプロンプト + `resume $GEMINI_SESSION`を使用、フロントエンドアーキテクチャを出力
 
@@ -158,6 +169,7 @@ TaskOutput({ task_id: "<task_id>", block: true, timeout: 600000 })
 `[Mode: Optimize]` - マルチモデル並列レビュー:
 
 **並列呼び出し**:
+
 - Codex: レビュアープロンプトを使用、セキュリティ、パフォーマンス、エラーハンドリングに焦点
 - Gemini: レビュアープロンプトを使用、アクセシビリティ、デザインの一貫性に焦点
 

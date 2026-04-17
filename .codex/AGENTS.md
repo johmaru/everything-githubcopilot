@@ -112,7 +112,21 @@ Legacy agents (3):
 - reviewer — PR review for correctness and security
 - docs-researcher — API and release-note verification
 
-Use `/agent` inside Codex CLI to inspect and steer agents.
+### Runtime note
+
+Agent registration in `.codex/config.toml` is a compatibility surface, not a guarantee of a stable manual picker UX in every Codex build.
+
+- Treat `/agent` as build-dependent. Some Codex builds may not expose registered custom agents through a reliable picker.
+- In local smoke tests on Codex v0.121.0, prompts that requested `planner` or `researcher` triggered `spawn_agent`, but the direct full-history agent-type override failed before Codex retried with a generic self-contained worker prompt. Treat this as an observed local runtime caveat and re-check on the target build, OS, and profile before standardizing an operator workflow.
+- Do not treat a single-thread role prompt switch as equivalent to `planner -> coder -> researcher`.
+
+### Recommended operation order
+
+1. Prefer an external orchestrator or prompt-driven control plane for the canonical `planner -> coder -> researcher` lane.
+2. Use Codex native named-agent delegation only when your current build can spawn the named agent without falling back to a generic worker.
+3. If named delegation is unavailable, keep the phase boundary outside Codex and use Codex as a worker for the phases it handles well.
+
+External orchestration replaces phase routing and handoff control only. Keep the root `AGENTS.md`, validation commands, review lanes, and `.codex/rules/` / hook boundaries in force.
 
 ## Implementation Lane
 

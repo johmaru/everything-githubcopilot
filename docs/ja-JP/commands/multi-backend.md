@@ -2,7 +2,9 @@
 
 バックエンド中心のワークフロー(調査 → アイデア創出 → 計画 → 実装 → 最適化 → レビュー)、Codex主導。
 
-## 使用方法
+これは外部 control plane 向けの reference guide であり、このリポジトリがそのまま shipped する slash prompt ではありません。実際の shipped command surface は `.github/prompts/*.prompt.md` です。
+
+## 参照構文
 
 ```bash
 /backend <バックエンドタスクの説明>
@@ -13,12 +15,17 @@
 - バックエンドタスク: $ARGUMENTS
 - Codex主導、Geminiは補助的な参照用
 - 適用範囲: API設計、アルゴリズム実装、データベース最適化、ビジネスロジック
+- Codex の custom agent picker や named delegation がビルド依存で不安定な場合の、安定した worker 運用パス
+- 外部オーケストレータが担うのは phase routing と handoff control であり、検証ループ、review lane、validation commands、policy boundary を置き換えるものではない
 
 ## 役割
 
 あなたは**バックエンドオーケストレーター**として、サーバーサイドタスクのためのマルチモデル連携を調整します(調査 → アイデア創出 → 計画 → 実装 → 最適化 → レビュー)。
 
+この文書は外部オーケストレータから Codex を worker として呼ぶ互換ガイドです。以下の `.claude` wrapper と `ROLE_FILE` パスは repo の shipped runtime payload ではなく、外部 control plane の reference 例として扱ってください。手元の control plane に同等の wrapper や role prompt path がない場合は、その環境に合わせて置き換えてください。
+
 **連携モデル**:
+
 - **Codex** – バックエンドロジック、アルゴリズム(**バックエンドの権威、信頼できる**)
 - **Gemini** – フロントエンドの視点(**バックエンドの意見は参考のみ**)
 - **Claude(自身)** – オーケストレーション、計画、実装、配信
@@ -63,11 +70,11 @@ EOF",
 
 **ロールプロンプト**:
 
-| フェーズ | Codex |
-|-------|-------|
-| 分析 | `~/.claude/.ccg/prompts/codex/analyzer.md` |
-| 計画 | `~/.claude/.ccg/prompts/codex/architect.md` |
-| レビュー | `~/.claude/.ccg/prompts/codex/reviewer.md` |
+| フェーズ | Codex                                       |
+| -------- | ------------------------------------------- |
+| 分析     | `~/.claude/.ccg/prompts/codex/analyzer.md`  |
+| 計画     | `~/.claude/.ccg/prompts/codex/architect.md` |
+| レビュー | `~/.claude/.ccg/prompts/codex/reviewer.md`  |
 
 **セッション再利用**: 各呼び出しは`SESSION_ID: xxx`を返します。後続のフェーズでは`resume xxx`を使用してください。フェーズ2で`CODEX_SESSION`を保存し、フェーズ3と5で`resume`を使用します。
 
@@ -99,6 +106,7 @@ EOF",
 `[Mode: Ideation]` - Codex主導の分析
 
 **Codexを呼び出す必要があります**(上記の呼び出し仕様に従う):
+
 - ROLE_FILE: `~/.claude/.ccg/prompts/codex/analyzer.md`
 - Requirement: 強化された要件(または強化されていない場合は$ARGUMENTS)
 - Context: フェーズ1からのプロジェクトコンテキスト
@@ -113,6 +121,7 @@ EOF",
 `[Mode: Plan]` - Codex主導の計画
 
 **Codexを呼び出す必要があります**(`resume <CODEX_SESSION>`を使用してセッションを再利用):
+
 - ROLE_FILE: `~/.claude/.ccg/prompts/codex/architect.md`
 - Requirement: ユーザーが選択したソリューション
 - Context: フェーズ2からの分析結果
@@ -133,6 +142,7 @@ Claudeが計画を統合し、ユーザーの承認後に`.claude/plan/task-name
 `[Mode: Optimize]` - Codex主導のレビュー
 
 **Codexを呼び出す必要があります**(上記の呼び出し仕様に従う):
+
 - ROLE_FILE: `~/.claude/.ccg/prompts/codex/reviewer.md`
 - Requirement: 以下のバックエンドコード変更をレビュー
 - Context: git diffまたはコード内容

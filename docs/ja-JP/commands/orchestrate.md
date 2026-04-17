@@ -2,7 +2,19 @@
 
 複雑なタスクのための連続的なエージェントワークフロー。
 
-## 使用方法
+これは workflow pattern の reference guide であり、このリポジトリがそのまま shipped する slash prompt ではありません。実際の shipped command surface は `.github/prompts/*.prompt.md` です。
+
+## Codex CLI互換の注意
+
+このドキュメントは `planner -> coder -> researcher` という標準レーンを定義するものです。Codex CLI では custom agent registry がビルドによって stable な picker として露出しない場合があるため、Codex 単独で同じ UI/UX を前提にしないでください。
+
+- Codex の named agent spawn が実ビルドで確認できた場合だけ、Codex 側で直接 delegation を使います。
+- それ以外では Copilot か外部オーケストレータが phase と handoff を管理し、Codex は worker として参加させます。
+- 単一スレッドで role prompt を切り替えるだけの代用は、このレーンの正式な代替として扱いません。
+
+外部 orchestration に切り替える場合でも、root `AGENTS.md`、検証ループ、review lane、validation コマンドの境界は維持します。外に出すのは phase routing と handoff control だけです。
+
+## 参照構文
 
 `/orchestrate [ワークフロータイプ] [タスク説明]`
 
@@ -52,20 +64,20 @@ planner -> coder -> researcher + security-reviewer
 
 ### 実装レーン（編集あり）
 
-| エージェント | 役割                 | モデル         | ツールアクセス |
-| ------------ | -------------------- | -------------- | -------------- |
-| planner      | 戦略計画             | GPT-5.4 (Pro+) | 読み取り専用   |
-| coder        | 実装・検証           | Kimi 2.5 BYOK  | 完全アクセス   |
-| researcher   | 調査サブエージェント | GPT-5.4 mini   | 読み取り専用   |
+| エージェント | 役割                 | モデル                        | ツールアクセス |
+| ------------ | -------------------- | ----------------------------- | -------------- |
+| planner      | 戦略計画             | 構成済み planning model       | 読み取り専用   |
+| coder        | 実装・検証           | 構成済み implementation model | 完全アクセス   |
+| researcher   | 調査サブエージェント | 構成済み research model       | 読み取り専用   |
 
 ワークフロー: **planner → (handoff) → coder → (handoff) → researcher**
 失敗時: **coder → (handoff) → planner** (再計画)
 
 ### 支援レーン（編集なし・安全）
 
-| エージェント | 役割       | モデル         | ツールアクセス |
-| ------------ | ---------- | -------------- | -------------- |
-| supporter    | 安全な支援 | GPT-5.4 (Pro+) | 読み取り専用   |
+| エージェント | 役割       | モデル                 | ツールアクセス |
+| ------------ | ---------- | ---------------------- | -------------- |
+| supporter    | 安全な支援 | 構成済み support model | 読み取り専用   |
 
 ワークフロー: **supporter → (handoff) → planner** (実装計画へ昇格)
 ワークフロー: **supporter → (handoff) → researcher** (深い調査)
@@ -78,6 +90,8 @@ planner -> coder -> researcher + security-reviewer
 2. 出力を構造化されたハンドオフドキュメントとして**収集**
 3. チェーン内の**次のエージェントに渡す**
 4. 結果を最終レポートに**集約**
+
+Codex build の制約で custom agent picker が安定しない場合は、この実行パターン自体は維持しつつ、エージェントの切替を外部オーケストレータから制御します。この判断は target build / OS / profile ごとに smoke test で再確認してください。
 
 ## ハンドオフドキュメント形式
 
@@ -115,19 +129,19 @@ planner -> coder -> researcher + security-reviewer
 
 以下を実行します:
 
-1. **Plannerエージェント** (GPT-5.4, 読み取り専用)
+1. **Plannerエージェント** (構成済み planning model, 読み取り専用)
    - 要件を分析
    - 実装計画を作成
    - 依存関係を特定
    - 出力: `HANDOFF: planner → coder`
 
-2. **Coderエージェント** (Kimi 2.5 BYOK, 完全アクセス)
+2. **Coderエージェント** (構成済み implementation model, 完全アクセス)
    - プランナーのハンドオフを読み込む
    - 検証ループ（✅/❌）で実装
    - 必要に応じてresearcherを呼び出し
    - 出力: `HANDOFF: coder → researcher` または `HANDOFF: coder → (完了)`
 
-3. **Researcherエージェント** (GPT-5.4 mini, 読み取り専用)
+3. **Researcherエージェント** (構成済み research model, 読み取り専用)
    - 変更差分の read-only review
    - 回帰とリスクの確認
    - 必要に応じて追加調査を実施
@@ -214,6 +228,8 @@ $ARGUMENTS:
 - `refactor <説明>` - リファクタリングワークフロー
 - `security <説明>` - セキュリティレビューワークフロー
 - `custom <エージェント> <説明>` - カスタムエージェントシーケンス
+
+`custom` シーケンスは control plane が agent routing を実行できる前提の記法です。Codex current build で direct named delegation が不安定な場合、これを Codex 単独の stable UI とみなさないでください。
 
 ## カスタムワークフローの例
 

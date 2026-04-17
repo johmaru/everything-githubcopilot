@@ -76,6 +76,8 @@ planner, coder, researcher, supporter
 - `.codex/AGENTS.md` — Codex compatibility notes for hooks, rules, and agents
 - `.agents/skills/` — project-local bridge from `.github/skills/` for Codex skill auto-discovery; setup creates a junction when possible and a copied fallback otherwise
 - `.github/prompts/` remains the canonical workflow authoring surface; this repository does not ship runtime `.codex/prompts/`
+- Custom Codex agents are packaged as compatibility assets, but the repository does not treat interactive picker/runtime behavior as a guaranteed contract across Codex builds; stable orchestration remains Copilot-first or external-control-plane-first.
+- Current validators verify the Codex compatibility surface and instruction boundaries, not whether a particular Codex build exposes custom agents through a stable picker UX.
 - `scripts/hooks/codex-pre-tool-use.js` — PreToolUse hook blocking `--no-verify`
 - Project setup (`scripts/installer/project-setup.js`) copies `.codex/` into target projects and installs the `.agents/skills/` bridge
 
@@ -84,7 +86,7 @@ planner, coder, researcher, supporter
 - `README.md` rewritten for Copilot-first framing
 - `AGENTS.md` rewritten as Copilot guide
 - Translation files (zh-CN, ja-JP) maintained; ko-KR, pt-BR, tr, zh-TW removed (EN/JP/CN only)
-- Legacy ECC docs in `docs/` replaced with redirect notices
+- Most legacy ECC docs in `docs/` were replaced with redirect notices, while selected operator and compatibility guides remain active under `docs/ja-JP/commands/`
 
 ## Remaining work
 
