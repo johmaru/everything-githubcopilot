@@ -12,6 +12,7 @@ const { execFileSync, execSync } = require('child_process');
 
 const repoRoot = path.join(__dirname, '..', '..');
 const validatorsDir = path.join(repoRoot, 'scripts', 'ci');
+const SHIPPED_CODEX_STOP_COMMAND = `node -e "var fs=require('fs'),path=require('path');var dir=process.cwd();var rel='scripts/hooks/codex-stop.js';for(;;){var candidate=path.join(dir,rel);var hasMarkers=fs.existsSync(path.join(dir,'AGENTS.md'))&&fs.existsSync(path.join(dir,'.codex','hooks.json'));if(hasMarkers){if(fs.existsSync(candidate)){process.chdir(dir);var mod=require(candidate);if(mod&&typeof mod.main==='function'){mod.main()}}else{process.exit(0)}break;}var parent=path.dirname(dir);if(parent===dir){process.exit(0)}dir=parent}"`;
 let packedFilePathsCache = null;
 
 function test(name, fn) {
@@ -211,7 +212,23 @@ function writeCodexCompatibilitySurface(testDir, options = {}) {
     readme = '# Test\n\n`.codex/` is a compatibility surface.\n',
     configToml = 'approval_policy = "on-request"\n',
     createSkillsBridge = false,
+    createCodexSkillsMirror = false,
     includeHooks = true,
+    hooksJson = JSON.stringify({
+      hooks: {
+        Stop: [
+          {
+            hooks: [
+              {
+                type: 'command',
+                command: SHIPPED_CODEX_STOP_COMMAND,
+                  timeout: 30,
+              },
+            ],
+          },
+        ],
+      },
+    }, null, 2),
     includeRules = true,
     includeAgents = true,
   } = options;
@@ -221,7 +238,7 @@ function writeCodexCompatibilitySurface(testDir, options = {}) {
   writeCodexAgentsDoc(path.join(testDir, '.codex', 'AGENTS.md'), agentsDocExtraLines);
 
   if (includeHooks) {
-    fs.writeFileSync(path.join(testDir, '.codex', 'hooks.json'), '{\n  "hooks": {}\n}\n');
+    fs.writeFileSync(path.join(testDir, '.codex', 'hooks.json'), hooksJson);
   }
 
   if (includeRules) {
@@ -236,6 +253,10 @@ function writeCodexCompatibilitySurface(testDir, options = {}) {
 
   if (createSkillsBridge) {
     fs.mkdirSync(path.join(testDir, '.agents', 'skills'), { recursive: true });
+  }
+
+  if (createCodexSkillsMirror) {
+    fs.mkdirSync(path.join(testDir, '.codex', 'skills'), { recursive: true });
   }
 
   fs.writeFileSync(path.join(testDir, 'README.md'), readme);
@@ -2328,6 +2349,147 @@ results.push(test('validate-copilot-customizations allows .agents/skills/ when p
     });
 
     assert.strictEqual(result.code, 0, result.stderr);
+  } finally {
+    cleanupTestDir(testDir);
+  }
+}));
+
+results.push(test('validate-copilot-customizations rejects .codex hooks Stop handlers that bypass the codex-stop wrapper', () => {
+  const testDir = createTestDir();
+  try {
+    writeMinimalRepoFixtures(testDir);
+    writeCodexCompatibilitySurface(testDir, {
+      createSkillsBridge: true,
+      hooksJson: JSON.stringify({
+        hooks: {
+          Stop: [
+            {
+              description: 'legacy raw stop hooks',
+              hooks: [
+                {
+                  type: 'command',
+                  command: 'node ./scripts/hooks/session-stop.js',
+                  timeout: 10,
+                },
+              ],
+            },
+          ],
+        },
+      }, null, 2),
+    });
+
+    const result = runValidatorWithOverrides('validate-copilot-customizations', {
+      ROOT: testDir,
+      GITHUB_DIR: path.join(testDir, '.github'),
+      README_PATH: path.join(testDir, 'README.md'),
+      COPILOT_INSTRUCTIONS: path.join(testDir, '.github', 'copilot-instructions.md'),
+      INSTRUCTIONS_DIR: path.join(testDir, '.github', 'instructions'),
+      PROMPTS_DIR: path.join(testDir, '.github', 'prompts'),
+      AGENTS_DIR: path.join(testDir, '.github', 'agents'),
+    });
+
+    assert.strictEqual(result.code, 1, 'should fail when Stop hooks bypass the codex-stop wrapper');
+    assert.ok(result.stderr.includes('P1-012'), 'should report the Codex contract rule id');
+    assert.ok(result.stderr.includes('.codex/hooks.json'), 'should identify the broken Codex hooks surface');
+    assert.ok(result.stderr.includes('codex-stop'), 'should require the codex-stop wrapper');
+  } finally {
+    cleanupTestDir(testDir);
+  }
+}));
+
+results.push(test('validate-copilot-customizations rejects .codex hooks that omit Stop entirely', () => {
+  const testDir = createTestDir();
+  try {
+    writeMinimalRepoFixtures(testDir);
+    writeCodexCompatibilitySurface(testDir, {
+      createSkillsBridge: true,
+      hooksJson: JSON.stringify({ hooks: {} }, null, 2),
+    });
+
+    const result = runValidatorWithOverrides('validate-copilot-customizations', {
+      ROOT: testDir,
+      GITHUB_DIR: path.join(testDir, '.github'),
+      README_PATH: path.join(testDir, 'README.md'),
+      COPILOT_INSTRUCTIONS: path.join(testDir, '.github', 'copilot-instructions.md'),
+      INSTRUCTIONS_DIR: path.join(testDir, '.github', 'instructions'),
+      PROMPTS_DIR: path.join(testDir, '.github', 'prompts'),
+      AGENTS_DIR: path.join(testDir, '.github', 'agents'),
+    });
+
+    assert.strictEqual(result.code, 1, 'should fail when Stop is omitted from .codex/hooks.json');
+    assert.ok(result.stderr.includes('P1-012'), 'should report the Codex contract rule id');
+    assert.ok(result.stderr.includes('Stop'), 'should mention the missing Stop contract');
+  } finally {
+    cleanupTestDir(testDir);
+  }
+}));
+
+results.push(test('validate-copilot-customizations rejects Stop commands that drift from the shipped codex-stop wrapper command', () => {
+  const testDir = createTestDir();
+  try {
+    writeMinimalRepoFixtures(testDir);
+    writeCodexCompatibilitySurface(testDir, {
+      createSkillsBridge: true,
+      hooksJson: JSON.stringify({
+        hooks: {
+          Stop: [
+            {
+              hooks: [
+                {
+                  type: 'command',
+                  command: `${SHIPPED_CODEX_STOP_COMMAND} && echo unexpected`,
+                  timeout: 10,
+                },
+              ],
+            },
+          ],
+        },
+      }, null, 2),
+    });
+
+    const result = runValidatorWithOverrides('validate-copilot-customizations', {
+      ROOT: testDir,
+      GITHUB_DIR: path.join(testDir, '.github'),
+      README_PATH: path.join(testDir, 'README.md'),
+      COPILOT_INSTRUCTIONS: path.join(testDir, '.github', 'copilot-instructions.md'),
+      INSTRUCTIONS_DIR: path.join(testDir, '.github', 'instructions'),
+      PROMPTS_DIR: path.join(testDir, '.github', 'prompts'),
+      AGENTS_DIR: path.join(testDir, '.github', 'agents'),
+    });
+
+    assert.strictEqual(result.code, 1, 'should fail when the Stop wrapper command drifts from the shipped contract');
+    assert.ok(result.stderr.includes('P1-012'), 'should report the Codex contract rule id');
+    assert.ok(result.stderr.includes('codex-stop'), 'should identify the Stop wrapper contract');
+  } finally {
+    cleanupTestDir(testDir);
+  }
+}));
+
+results.push(test('validate-copilot-customizations rejects .codex/AGENTS.md guidance that claims skills are discovered from .codex/skills', () => {
+  const testDir = createTestDir();
+  try {
+    writeMinimalRepoFixtures(testDir);
+    writeCodexCompatibilitySurface(testDir, {
+      createSkillsBridge: true,
+      createCodexSkillsMirror: true,
+      agentsDocExtraLines: [
+        'Codex discovers skills from `.codex/skills/`.',
+      ],
+    });
+
+    const result = runValidatorWithOverrides('validate-copilot-customizations', {
+      ROOT: testDir,
+      GITHUB_DIR: path.join(testDir, '.github'),
+      README_PATH: path.join(testDir, 'README.md'),
+      COPILOT_INSTRUCTIONS: path.join(testDir, '.github', 'copilot-instructions.md'),
+      INSTRUCTIONS_DIR: path.join(testDir, '.github', 'instructions'),
+      PROMPTS_DIR: path.join(testDir, '.github', 'prompts'),
+      AGENTS_DIR: path.join(testDir, '.github', 'agents'),
+    });
+
+    assert.strictEqual(result.code, 1, 'should fail when .codex/AGENTS.md rewrites the canonical skills discovery path');
+    assert.ok(result.stderr.includes('P1-012'), 'should report the Codex contract rule id');
+    assert.ok(result.stderr.includes('.codex/skills'), 'should identify the incorrect discovery-path claim');
   } finally {
     cleanupTestDir(testDir);
   }

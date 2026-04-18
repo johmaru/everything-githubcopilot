@@ -64,13 +64,14 @@ Common causes:
 
 - project setup was never run for this project
 - the `.agents/skills/` bridge is missing in the project
+- the `.codex/skills/` compatibility alias is missing for a direct path consumer
 - you are expecting runtime `.codex/instructions/` or `.codex/prompts/`, which this repository does not ship
 - invalid home-level skills exist under `~/.codex/skills` and are outside this repository
 
 Fixes:
 
-- run the project setup command again for the target project and confirm that `.agents/skills/` exists afterward
-- use the root `AGENTS.md`, `.codex/config.toml`, `.codex/agents/`, `.codex/hooks.json`, `.codex/rules/`, and the project-local `.agents/skills/` bridge as the Codex runtime surfaces
+- run the project setup command again for the target project and confirm that both `.agents/skills/` and `.codex/skills/` exist afterward
+- use the root `AGENTS.md`, `.codex/config.toml`, `.codex/agents/`, `.codex/hooks.json`, `.codex/rules/`, the project-local `.agents/skills/` bridge, and the `.codex/skills/` compatibility alias as the Codex runtime surfaces
 - repair or remove broken home-level skills under `~/.codex/skills`
 - if the warning path is outside the repository, treat it as user-environment state rather than a shipped package bug
 
@@ -129,6 +130,7 @@ What to check:
 - the JSON is valid
 - the matcher is narrow enough to be predictable
 - the hook does not depend on undocumented external state
+- for Codex CLI, the project-local `.codex/hooks.json` commands should resolve from the nearest project root that contains `AGENTS.md` and `.codex/hooks.json`, and Stop should flow through a single wrapper so only one JSON payload reaches Codex
 
 Good debugging pattern:
 

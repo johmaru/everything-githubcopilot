@@ -16,6 +16,7 @@ Codex should continue to use the root `AGENTS.md` for project instructions.
 
 - Project instructions come from the root `AGENTS.md`
 - Codex expects skills at `.agents/skills/`, and project setup creates that bridge from `.github/skills/`
+- Project setup also creates `.codex/skills/` as a compatibility alias for direct path consumers; discovery remains `.agents/skills/`
 - `.codex/` carries config, agent registrations, hooks, and rules
 - This repository does not ship runtime `.codex/instructions/`, `.codex/prompts/`, or `~/.codex/skills/` payloads
 - Project setup ships `scripts/codex-flow.js` as the supported external orchestrator for the canonical Codex-only lane
@@ -62,13 +63,13 @@ Codex supports experimental hooks via `features.codex_hooks = true` in config.to
 - PreToolUse: block `--no-verify` on git commands, warn before `git push`
 - PostToolUse: record tool observations
 - SessionStart: inject prior session summary
-- Stop: persist session summary, cleanup backups and typecheck state
+- Stop: run a single `codex-stop.js` wrapper that persists the session summary and cleans up backups and typecheck state
 
 **Limitations:**
 
 - PreToolUse/PostToolUse only intercept Bash tool calls
 - Write/Edit/MultiEdit enforcement uses `.codex/rules/security.rules` instead
-- Windows hooks are temporarily disabled
+- Native Windows is supported; hook commands walk up to the nearest project root that contains `AGENTS.md` and `.codex/hooks.json` before loading the target script
 
 ## Execution Policy (Rules)
 

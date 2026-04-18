@@ -23,6 +23,8 @@ const KNOWLEDGE_AUDIT_PROMPT = path.join(PROMPTS_DIR, 'knowledge-audit.prompt.md
 const VERIFY_PROMPT = path.join(PROMPTS_DIR, 'verify.prompt.md');
 const CODER_AGENT = path.join(AGENTS_DIR, 'coder.agent.md');
 const SAFETY_CHECKER_AGENT = path.join(AGENTS_DIR, 'safety-checker.agent.md');
+const EXPECTED_CODEX_STOP_COMMAND = `node -e "var fs=require('fs'),path=require('path');var dir=process.cwd();var rel='scripts/hooks/codex-stop.js';for(;;){var candidate=path.join(dir,rel);var hasMarkers=fs.existsSync(path.join(dir,'AGENTS.md'))&&fs.existsSync(path.join(dir,'.codex','hooks.json'));if(hasMarkers){if(fs.existsSync(candidate)){process.chdir(dir);var mod=require(candidate);if(mod&&typeof mod.main==='function'){mod.main()}}else{process.exit(0)}break;}var parent=path.dirname(dir);if(parent===dir){process.exit(0)}dir=parent}"`;
+const EXPECTED_CODEX_STOP_TIMEOUT = 30;
 
 const BUILT_IN_PROMPT_AGENTS = new Set(['ask', 'agent', 'plan']);
 
@@ -845,6 +847,41 @@ function validateCodexContracts(errors) {
     }
   }
 
+  if (fs.existsSync(codexHooks)) {
+    let hooksConfig = null;
+    try {
+      hooksConfig = JSON.parse(readUtf8(codexHooks));
+    } catch (error) {
+      errors.push(`ERROR: P1-012: .codex/hooks.json must contain valid JSON (${error.message})`);
+    }
+
+    if (hooksConfig && (!hooksConfig.hooks || !Array.isArray(hooksConfig.hooks.Stop) || hooksConfig.hooks.Stop.length === 0)) {
+      errors.push('ERROR: P1-012: .codex/hooks.json must define Stop as a single codex-stop.js command');
+    }
+
+    if (hooksConfig && hooksConfig.hooks && Array.isArray(hooksConfig.hooks.Stop)) {
+      const stopEntries = hooksConfig.hooks.Stop;
+      const primaryStopEntry = stopEntries[0] || null;
+      const stopHooks = primaryStopEntry && Array.isArray(primaryStopEntry.hooks) ? primaryStopEntry.hooks : [];
+      const stopCommandEntry = stopHooks.length === 1 && stopHooks[0] && stopHooks[0].type === 'command'
+        ? stopHooks[0]
+        : null;
+      const stopCommand = stopCommandEntry && typeof stopCommandEntry.command === 'string'
+        ? stopCommandEntry.command
+        : '';
+
+      if (
+        stopEntries.length !== 1
+        || stopHooks.length !== 1
+        || !stopCommand
+        || stopCommand.trim() !== EXPECTED_CODEX_STOP_COMMAND.trim()
+        || stopCommandEntry.timeout !== EXPECTED_CODEX_STOP_TIMEOUT
+      ) {
+        errors.push('ERROR: P1-012: .codex/hooks.json Stop must delegate through a single codex-stop.js command so Codex receives valid JSON stdout');
+      }
+    }
+  }
+
   if (fs.existsSync(codexAgentsFile)) {
     const content = readUtf8(codexAgentsFile);
     const staleRefs = [
@@ -857,6 +894,11 @@ function validateCodexContracts(errors) {
       if (content.includes(pattern) && !fs.existsSync(path.join(ROOT, label))) {
         errors.push(`ERROR: P1-012: .codex/AGENTS.md references non-existent path '${label}'`);
       }
+    }
+
+    if (/skills\s+are\s+discovered\s+from\s+`?\.codex\/skills\/?`?/iu.test(content)
+      || /codex\s+discovers\s+skills\s+from\s+`?\.codex\/skills\/?`?/iu.test(content)) {
+      errors.push('ERROR: P1-012: .codex/AGENTS.md must keep .agents/skills as the canonical Codex discovery path; .codex/skills is compatibility-only');
     }
 
     validateAnchoredContract(

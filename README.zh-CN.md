@@ -59,7 +59,7 @@ npm run lint
 
 将所有 Copilot 自定义作为 shared project payload 复制到任意项目：`.github/`、`.github/workflows/`、`AGENTS.md`、`.codex/`、`schemas/`、`scripts/codex-flow.js`、`scripts/ci/`、`scripts/hooks/`、`tests/fixtures/`、`rust/semantic-indexer/`，以及在目标项目尚未存在时复制 `.vscode/settings.json`。如果目标项目已经有 `.vscode/settings.json`，安装器会给出警告并保留原文件。
 
-对于 Codex CLI，project setup 还会分发 project-local 的 `.codex/` runtime assets，并尝试创建 `.agents/skills/`，把 `.github/skills/` 作为 Codex skill discovery 的桥接目录。Codex 会继续读取根目录 `AGENTS.md` 作为项目 instructions，而 `.codex/AGENTS.md` 只保留为随仓库分发的 Codex 兼容说明。
+对于 Codex CLI，project setup 还会分发 project-local 的 `.codex/` runtime assets，创建 canonical 的 `.agents/skills/` 作为 `.github/skills/` 到 Codex skill discovery 的桥接目录，并额外创建 `.codex/skills/` 作为 direct path consumer 的兼容 alias。Codex 会继续读取根目录 `AGENTS.md` 作为项目 instructions，而 `.codex/AGENTS.md` 只保留为随仓库分发的 Codex 兼容说明。
 
 完成 project setup 后，可在目标项目中运行 `node scripts/codex-flow.js "<task>"`。这个 external orchestrator 会按顺序执行 `plan -> implement -> review`，并把 phase artifact 写入 `.github/sessions/codex-flow/`。
 
@@ -85,7 +85,7 @@ target path 是必填项，而且必须位于 source checkout 之外。setup wra
 
 将指令、代理、技能、提示、钩子和 schema 安装到 `~/.copilot/`，并更新当前用户的 VS Code 设置，让所有工作区都能发现它们。
 
-注意: user-level installer 只面向 VS Code Copilot。Codex CLI 需要的 `.codex/` 和 project-local `.agents/skills/` 桥接目录应通过 project setup 分发到各个项目中。安装器不会管理 `~/.codex/skills`，因此那里出现的 invalid `SKILL.md` 警告需要在你的 Codex home 中修复或删除。
+注意: user-level installer 只面向 VS Code Copilot。Codex CLI 需要的 `.codex/`、project-local `.agents/skills/` 桥接目录，以及 `.codex/skills/` 兼容 alias 应通过 project setup 分发到各个项目中。安装器不会管理 `~/.codex/skills`，因此那里出现的 invalid `SKILL.md` 警告需要在你的 Codex home 中修复或删除。
 
 安装器会同步仓库当前的 VS Code discovery baseline：启用 `~/.copilot` 下的 instructions / agents / skills / prompts / hooks，启用 `AGENTS.md`，保持 `CLAUDE.md` 关闭，并显式关闭 legacy `.claude` 规则与 hook 入口。
 

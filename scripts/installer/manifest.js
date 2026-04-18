@@ -56,6 +56,7 @@ function getProjectInstallManifest() {
   return {
     managedPaths: [
       '.agents/skills',
+      '.codex/skills',
     ],
     copyOperations: [
       { src: '.github/copilot-instructions.md', dst: '.github/copilot-instructions.md', single: true },

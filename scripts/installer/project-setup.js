@@ -77,8 +77,17 @@ function absolutePathsMatch(leftPath, rightPath) {
 }
 
 function getAllowedManagedRedirectTargets(targetRoot, relativePath) {
-  if (normalizeRelativePath(relativePath) === '.agents/skills') {
+  const normalizedRelativePath = normalizeRelativePath(relativePath);
+
+  if (normalizedRelativePath === '.agents/skills') {
     return [path.join(targetRoot, '.github', 'skills')];
+  }
+
+  if (normalizedRelativePath === '.codex/skills') {
+    return [
+      path.join(targetRoot, '.agents', 'skills'),
+      path.join(targetRoot, '.github', 'skills'),
+    ];
   }
 
   return [];
@@ -950,6 +959,17 @@ function restoreFileFromBackup(targetRoot, backupRoot, relativePath, options = {
     return false;
   }
 
+  if (pathEntryExists(targetPath)) {
+    const targetStats = fs.lstatSync(targetPath);
+    if (targetStats.isSymbolicLink()) {
+      fs.unlinkSync(targetPath);
+    } else if (targetStats.isDirectory()) {
+      fs.rmSync(targetPath, { recursive: true, force: true });
+    } else {
+      fs.rmSync(targetPath, { force: true });
+    }
+  }
+
   fs.mkdirSync(path.dirname(targetPath), { recursive: true });
   fs.copyFileSync(backupPath, targetPath);
   return true;
@@ -957,11 +977,18 @@ function restoreFileFromBackup(targetRoot, backupRoot, relativePath, options = {
 
 function removeManagedFile(targetRoot, relativePath, options = {}) {
   const targetPath = resolveRelativePath(targetRoot, relativePath, options);
-  if (!fs.existsSync(targetPath)) {
+  if (!pathEntryExists(targetPath)) {
     return;
   }
 
-  fs.rmSync(targetPath, { recursive: true, force: true });
+  const targetStats = fs.lstatSync(targetPath);
+  if (targetStats.isSymbolicLink()) {
+    fs.unlinkSync(targetPath);
+  } else if (targetStats.isDirectory()) {
+    fs.rmSync(targetPath, { recursive: true, force: true });
+  } else {
+    fs.rmSync(targetPath, { force: true });
+  }
   pruneEmptyParents(path.dirname(targetPath), targetRoot);
 }
 
@@ -1174,10 +1201,128 @@ function ensureSkillsJunction(targetRoot, backupRoot, stateRef = null, preexisti
   };
 }
 
+function ensureCodexSkillsCompatibilityAlias(targetRoot, backupRoot, stateRef = null, preexistingDirectories = new Set()) {
+  const codexDir = path.join(targetRoot, '.codex');
+  const aliasPath = path.join(codexDir, 'skills');
+  const primarySource = path.join(targetRoot, '.agents', 'skills');
+  const allowedSources = [
+    primarySource,
+    path.join(targetRoot, '.github', 'skills'),
+  ];
+  const copiedFiles = stateRef ? stateRef.copiedFiles : [];
+  const backupFiles = new Set(stateRef ? stateRef.backupFiles : []);
+  const bridgeRelativePath = '.codex/skills';
+  const preservedDirectories = stateRef ? (stateRef.preservedDirectories || []) : [];
+  const warnings = [];
+
+  if (!fs.existsSync(primarySource)) {
+    return { warnings };
+  }
+
+  const liveLinkTarget = getLinkTargetPath(aliasPath);
+  if (liveLinkTarget) {
+    ensureExistingPathResolvesInsideTargetRoot(targetRoot, aliasPath);
+    if (!allowedSources.some((sourcePath) => absolutePathsMatch(liveLinkTarget, sourcePath))) {
+      throw new Error('Existing .codex/skills link points to an unexpected target. Remove it and rerun project setup.');
+    }
+
+    if (preexistingDirectories.has('.codex')) {
+      addPreservedDirectory(preservedDirectories, '.codex', stateRef);
+    }
+    if (preexistingDirectories.has('.codex/skills')) {
+      addPreservedDirectory(preservedDirectories, '.codex/skills', stateRef);
+    }
+
+    return { warnings };
+  }
+
+  ensurePathInsideTargetRoot(targetRoot, codexDir);
+  ensurePathInsideTargetRoot(targetRoot, aliasPath);
+
+  fs.mkdirSync(codexDir, { recursive: true });
+
+  let aliasStats = null;
+  try {
+    aliasStats = fs.lstatSync(aliasPath);
+  } catch {
+    aliasStats = null;
+  }
+
+  let hadExistingDirectory = false;
+  if (aliasStats) {
+    if (aliasStats.isSymbolicLink()) {
+      if (fs.existsSync(aliasPath)) {
+        ensureExistingPathResolvesInsideTargetRoot(targetRoot, aliasPath);
+        if (!allowedSources.some((sourcePath) => pathsReferToSameLocation(aliasPath, sourcePath))) {
+          throw new Error('Existing .codex/skills link points to an unexpected target. Remove it and rerun project setup.');
+        }
+
+        return { warnings };
+      }
+
+      throw new Error('Cannot replace a broken .codex/skills symlink automatically. Remove it and rerun project setup.');
+    } else if (aliasStats.isDirectory()) {
+      hadExistingDirectory = true;
+      if (fs.readdirSync(aliasPath).length > 0) {
+        throw new Error('Existing .codex/skills directory must be empty. Remove it and rerun project setup.');
+      }
+    } else {
+      ensureBackupOfFile(targetRoot, backupRoot, aliasPath, backupFiles, stateRef);
+      fs.rmSync(aliasPath, { force: true });
+      addCopiedFile(copiedFiles, bridgeRelativePath);
+      aliasStats = null;
+    }
+  }
+
+  if (!aliasStats) {
+    try {
+      fs.symlinkSync(primarySource, aliasPath, 'junction');
+      addCopiedFile(copiedFiles, bridgeRelativePath);
+      if (preexistingDirectories.has('.codex')) {
+        addPreservedDirectory(preservedDirectories, '.codex', stateRef);
+      }
+      return {
+        warnings,
+        backupFiles: [...backupFiles],
+      };
+    } catch {
+      warnings.push('Warning: .codex/skills compatibility alias could not be created - installed a copied Codex skills mirror instead.');
+    }
+  }
+
+  copyRecursive(primarySource, aliasPath, {
+    targetRoot,
+    backupRoot,
+    backupFiles,
+    copiedFiles,
+    stateRef,
+  });
+
+  if (!hadExistingDirectory) {
+    addCopiedFile(copiedFiles, bridgeRelativePath);
+  }
+
+  if (preexistingDirectories.has('.codex')) {
+    addPreservedDirectory(preservedDirectories, '.codex', stateRef);
+  }
+  if (preexistingDirectories.has('.codex/skills')) {
+    addPreservedDirectory(preservedDirectories, '.codex/skills', stateRef);
+  }
+
+  if (stateRef) {
+    stateRef.backupFiles = [...backupFiles];
+  }
+
+  return {
+    warnings,
+    backupFiles: [...backupFiles],
+  };
+}
+
 function installProject(targetRoot) {
   const repoRoot = path.join(__dirname, '..', '..');
   const { stateFile, backupRoot } = getProjectInstallPaths(targetRoot);
-  const preexistingDirectories = collectPreexistingDirectories(targetRoot, ['.github', '.github/skills', '.agents', '.agents/skills']);
+  const preexistingDirectories = collectPreexistingDirectories(targetRoot, ['.github', '.github/skills', '.agents', '.agents/skills', '.codex', '.codex/skills']);
 
   if (fs.existsSync(stateFile)) {
     throw new Error('Existing project installer state found. Use reinstall or uninstall first.');
@@ -1200,6 +1345,9 @@ function installProject(targetRoot) {
   if (preexistingDirectories.has('.github/skills')) {
     addPreservedDirectory(transientState.preservedDirectories, '.github/skills', transientState);
   }
+  if (preexistingDirectories.has('.codex')) {
+    addPreservedDirectory(transientState.preservedDirectories, '.codex', transientState);
+  }
 
   try {
     const dependencyPlan = getDependencyInstallPlan(targetRoot);
@@ -1219,9 +1367,13 @@ function installProject(targetRoot) {
 
     const payload = copyProjectPayload(repoRoot, targetRoot, backupRoot, transientState);
     const skillsBridge = ensureSkillsJunction(targetRoot, backupRoot, transientState, preexistingDirectories);
+    const codexSkillsAlias = ensureCodexSkillsCompatibilityAlias(targetRoot, backupRoot, transientState, preexistingDirectories);
 
     if (skillsBridge.backupFiles) {
       transientState.backupFiles = skillsBridge.backupFiles;
+    }
+    if (codexSkillsAlias.backupFiles) {
+      transientState.backupFiles = codexSkillsAlias.backupFiles;
     }
 
     const backupFiles = new Set(transientState.backupFiles);
@@ -1243,6 +1395,9 @@ function installProject(targetRoot) {
     }
 
     for (const warning of skillsBridge.warnings || []) {
+      console.log(warning);
+    }
+    for (const warning of codexSkillsAlias.warnings || []) {
       console.log(warning);
     }
 

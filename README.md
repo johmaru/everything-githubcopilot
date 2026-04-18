@@ -99,7 +99,7 @@ An explicit target path is required, and it must be outside the source checkout.
 
 This copies the shared project payload into the target project: `.github/` assets, `.github/workflows/`, `.vscode/settings.json` when absent, `AGENTS.md`, `.codex/` (Codex CLI compatibility surface), `schemas/`, `scripts/codex-flow.js`, `scripts/ci/`, `scripts/hooks/`, `tests/fixtures/`, and `rust/semantic-indexer/`. It preserves an existing `.vscode/settings.json` with a warning instead of overwriting it.
 
-For Codex CLI, project setup also installs the project-local `.codex/` runtime assets and attempts to create `.agents/skills/` as the bridge from `.github/skills/` into Codex skill discovery. Codex continues to read the root `AGENTS.md` for project instructions, while `.codex/AGENTS.md` remains compatibility notes for the shipped Codex surface.
+For Codex CLI, project setup also installs the project-local `.codex/` runtime assets, creates `.agents/skills/` as the canonical bridge from `.github/skills/` into Codex skill discovery, and creates `.codex/skills/` as a compatibility alias for tools that still read that path directly. Codex continues to read the root `AGENTS.md` for project instructions, while `.codex/AGENTS.md` remains compatibility notes for the shipped Codex surface.
 
 After project setup, the supported Codex-only front door is `node scripts/codex-flow.js "<task>"` from the target project. The launcher acts as the external `plan -> implement -> review` orchestrator and writes phase artifacts under `.github/sessions/codex-flow/`.
 
@@ -113,7 +113,7 @@ Runtime dependencies now install from the target project's package manager when 
 
 Install instructions, agents, skills, prompts, hooks, and schemas into `~/.copilot/` for the current user, ship the Rust semantic indexer payload for local AST exploration, and update VS Code user settings so every workspace can discover the supported customization surfaces.
 
-> **Note:** The user-level installer targets VS Code Copilot only. `.codex/` is not installed to `~/.copilot/` because Codex CLI reads its runtime assets from each project. Use the project setup command to distribute `.codex/` and create the project-local `.agents/skills/` bridge in your projects. This installer does not manage `~/.codex/skills`, so warnings about invalid `SKILL.md` files there come from your Codex home state, not this package.
+> **Note:** The user-level installer targets VS Code Copilot only. `.codex/` is not installed to `~/.copilot/` because Codex CLI reads its runtime assets from each project. Use the project setup command to distribute `.codex/`, create the project-local `.agents/skills/` bridge, and create the `.codex/skills/` compatibility alias in your projects. This installer does not manage `~/.codex/skills`, so warnings about invalid `SKILL.md` files there come from your Codex home state, not this package.
 
 The installer now syncs the shipped VS Code discovery baseline for user settings: `~/.copilot` instructions, agents, skills, prompts, and hooks are enabled, `AGENTS.md` discovery is enabled, `CLAUDE.md` discovery stays disabled, and legacy `.claude` instruction / hook locations are explicitly turned off.
 

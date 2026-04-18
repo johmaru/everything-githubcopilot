@@ -88,7 +88,7 @@ results.push(test('project install manifest includes the current shipped project
   assert.strictEqual(instructionsOperation.recursive, true);
   assert.strictEqual(codexFlowOperation.dst, 'scripts/codex-flow.js');
   assert.strictEqual(codexFlowOperation.single, true);
-  assert.deepStrictEqual(manifest.managedPaths, ['.agents/skills']);
+  assert.deepStrictEqual(manifest.managedPaths, ['.agents/skills', '.codex/skills']);
 }));
 
 results.push(test('user install manifest does not include .codex (Codex reads from project root, not ~/.copilot)', () => {

@@ -59,7 +59,7 @@ planner, coder, researcher, supporter
 - Project setup copies `.github/`, `.github/workflows/`, `AGENTS.md`, `.codex/`, `schemas/`, `scripts/ci/`, `scripts/hooks/`, `tests/fixtures/`, and `rust/semantic-indexer/`
 - Existing `.vscode/settings.json` files are preserved with a warning; missing ones are seeded from the shipped workspace baseline
 - Dependency bootstrap follows the target project's package manager when it can detect one, and falls back to `npm` otherwise
-- Project setup installs the project-local `.agents/skills/` bridge for Codex skill discovery, using a junction when available and a copied fallback when junction creation fails
+- Project setup installs the project-local `.agents/skills/` bridge for Codex skill discovery, uses a junction when available and a copied fallback when junction creation fails, and now creates `.codex/skills/` as a compatibility alias for direct path consumers
 
 ### Package identity
 
@@ -75,11 +75,12 @@ planner, coder, researcher, supporter
 - `.codex/rules/security.rules` — Starlark execution policy carrying the Codex-facing enforcement subset; this repository does not ship runtime `.codex/instructions/`
 - `.codex/AGENTS.md` — Codex compatibility notes for hooks, rules, and agents
 - `.agents/skills/` — project-local bridge from `.github/skills/` for Codex skill auto-discovery; setup creates a junction when possible and a copied fallback otherwise
+- `.codex/skills/` — project-local compatibility alias that mirrors the canonical `.agents/skills/` bridge for direct path consumers
 - `.github/prompts/` remains the canonical workflow authoring surface; this repository does not ship runtime `.codex/prompts/`
 - Custom Codex agents are packaged as compatibility assets, but the repository does not treat interactive picker/runtime behavior as a guaranteed contract across Codex builds; stable orchestration remains Copilot-first or external-control-plane-first.
 - Current validators verify the Codex compatibility surface and instruction boundaries, not whether a particular Codex build exposes custom agents through a stable picker UX.
 - `scripts/hooks/codex-pre-tool-use.js` — PreToolUse hook blocking `--no-verify`
-- Project setup (`scripts/installer/project-setup.js`) copies `.codex/` into target projects and installs the `.agents/skills/` bridge
+- Project setup (`scripts/installer/project-setup.js`) copies `.codex/` into target projects, installs the `.agents/skills/` bridge, and creates the `.codex/skills/` compatibility alias
 
 ### Documentation
 

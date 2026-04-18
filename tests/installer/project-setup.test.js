@@ -28,6 +28,15 @@ function cleanupTestDir(testDir) {
   fs.rmSync(testDir, { recursive: true, force: true });
 }
 
+function pathEntryExists(targetPath) {
+  try {
+    fs.lstatSync(targetPath);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 function runProjectSetup(targetDir, env = {}) {
   const cliPath = path.join(__dirname, '..', '..', 'scripts', 'installer', 'project-setup.js');
   return execFileSync('node', [cliPath, targetDir], {
@@ -206,16 +215,21 @@ results.push(test('project setup falls back to a copied .agents/skills bridge wh
     projectSetup.installProject(targetDir);
 
     const bridgeDir = path.join(targetDir, '.agents', 'skills');
+    const codexBridgeDir = path.join(targetDir, '.codex', 'skills');
     const sampleSkill = path.join(bridgeDir, 'verification-loop', 'SKILL.md');
+    const codexSkill = path.join(codexBridgeDir, 'verification-loop', 'SKILL.md');
 
     assert.ok(fs.existsSync(bridgeDir), 'fallback bridge should exist even when junction creation fails');
+    assert.ok(fs.existsSync(codexBridgeDir), 'codex compatibility alias should also exist when junction creation fails');
     assert.ok(fs.statSync(bridgeDir).isDirectory(), 'fallback bridge should be a real directory');
     assert.strictEqual(fs.lstatSync(bridgeDir).isSymbolicLink(), false, 'fallback bridge should not remain a broken symlink');
     assert.ok(fs.existsSync(sampleSkill), 'fallback bridge should contain copied skills');
+    assert.ok(fs.existsSync(codexSkill), 'fallback codex compatibility alias should contain copied skills');
 
     projectSetup.uninstallProject(targetDir);
 
-    assert.strictEqual(fs.existsSync(bridgeDir), false, 'uninstall should remove the fallback bridge');
+    assert.strictEqual(pathEntryExists(bridgeDir), false, 'uninstall should remove the fallback bridge');
+    assert.strictEqual(pathEntryExists(codexBridgeDir), false, 'uninstall should remove the fallback codex compatibility alias');
   } finally {
     fs.symlinkSync = originalSymlinkSync;
     if (originalSkipDepInstall === undefined) {
@@ -249,6 +263,87 @@ results.push(test('project uninstall preserves preexisting empty .agents/skills 
     assert.strictEqual(fs.readdirSync(bridgeDir).length, 0, 'preserved .agents/skills directory should be restored empty');
   } finally {
     fs.symlinkSync = originalSymlinkSync;
+    if (originalSkipDepInstall === undefined) {
+      delete process.env.EGCOPILOT_SKIP_DEP_INSTALL;
+    } else {
+      process.env.EGCOPILOT_SKIP_DEP_INSTALL = originalSkipDepInstall;
+    }
+    cleanupTestDir(targetDir);
+  }
+}));
+
+results.push(test('project setup creates and removes a .codex/skills compatibility alias alongside the canonical .agents/skills bridge', () => {
+  const targetDir = createTestDir('egc-project-setup-');
+  const originalSkipDepInstall = process.env.EGCOPILOT_SKIP_DEP_INSTALL;
+
+  try {
+    process.env.EGCOPILOT_SKIP_DEP_INSTALL = '1';
+
+    projectSetup.installProject(targetDir);
+
+    const canonicalBridgeDir = path.join(targetDir, '.agents', 'skills');
+    const codexBridgeDir = path.join(targetDir, '.codex', 'skills');
+    const canonicalSkill = path.join(canonicalBridgeDir, 'verification-loop', 'SKILL.md');
+    const codexSkill = path.join(codexBridgeDir, 'verification-loop', 'SKILL.md');
+
+    assert.ok(fs.existsSync(canonicalBridgeDir), 'project setup should create the canonical .agents/skills bridge');
+    assert.ok(fs.existsSync(codexBridgeDir), 'project setup should create the .codex/skills compatibility alias');
+    assert.ok(fs.existsSync(canonicalSkill), 'canonical bridge should expose shipped skills');
+    assert.ok(fs.existsSync(codexSkill), '.codex compatibility alias should expose shipped skills');
+
+    projectSetup.uninstallProject(targetDir);
+
+    assert.strictEqual(pathEntryExists(codexBridgeDir), false, 'uninstall should remove the generated .codex/skills compatibility alias');
+  } finally {
+    if (originalSkipDepInstall === undefined) {
+      delete process.env.EGCOPILOT_SKIP_DEP_INSTALL;
+    } else {
+      process.env.EGCOPILOT_SKIP_DEP_INSTALL = originalSkipDepInstall;
+    }
+    cleanupTestDir(targetDir);
+  }
+}));
+
+results.push(test('project uninstall restores a preexisting .codex/skills file after setup replaces it with the compatibility alias', () => {
+  const targetDir = createTestDir('egc-project-setup-');
+  const originalSkipDepInstall = process.env.EGCOPILOT_SKIP_DEP_INSTALL;
+  const preexistingFile = path.join(targetDir, '.codex', 'skills');
+
+  try {
+    process.env.EGCOPILOT_SKIP_DEP_INSTALL = '1';
+    fs.mkdirSync(path.dirname(preexistingFile), { recursive: true });
+    fs.writeFileSync(preexistingFile, 'legacy-codex-skills-file\n', 'utf8');
+
+    projectSetup.installProject(targetDir);
+    projectSetup.uninstallProject(targetDir);
+
+    assert.strictEqual(fs.readFileSync(preexistingFile, 'utf8'), 'legacy-codex-skills-file\n', 'uninstall should restore the preexisting .codex/skills file');
+  } finally {
+    if (originalSkipDepInstall === undefined) {
+      delete process.env.EGCOPILOT_SKIP_DEP_INSTALL;
+    } else {
+      process.env.EGCOPILOT_SKIP_DEP_INSTALL = originalSkipDepInstall;
+    }
+    cleanupTestDir(targetDir);
+  }
+}));
+
+results.push(test('project setup rejects preexisting non-empty .codex/skills directories to avoid stale compatibility mirrors', () => {
+  const targetDir = createTestDir('egc-project-setup-');
+  const originalSkipDepInstall = process.env.EGCOPILOT_SKIP_DEP_INSTALL;
+  const codexSkillsDir = path.join(targetDir, '.codex', 'skills');
+
+  try {
+    process.env.EGCOPILOT_SKIP_DEP_INSTALL = '1';
+    fs.mkdirSync(codexSkillsDir, { recursive: true });
+    fs.writeFileSync(path.join(codexSkillsDir, 'stale-skill.txt'), 'stale\n', 'utf8');
+
+    assert.throws(
+      () => projectSetup.installProject(targetDir),
+      /\.codex\/skills directory must be empty|Remove it and rerun project setup/,
+      'setup should fail closed when a stale .codex/skills directory already exists'
+    );
+  } finally {
     if (originalSkipDepInstall === undefined) {
       delete process.env.EGCOPILOT_SKIP_DEP_INSTALL;
     } else {

@@ -8,7 +8,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "node -e \"var s='./scripts/hooks/session-start.js';require('fs').existsSync(s)&&require(s)\"",
+            "command": "node -e \"var fs=require('fs'),path=require('path');var dir=process.cwd();var rel='scripts/hooks/session-start.js';for(;;){var candidate=path.join(dir,rel);var hasMarkers=fs.existsSync(path.join(dir,'AGENTS.md'))&&fs.existsSync(path.join(dir,'.codex','hooks.json'));if(hasMarkers){if(fs.existsSync(candidate)){process.chdir(dir);require(candidate)}else{process.exit(0)}break;}var parent=path.dirname(dir);if(parent===dir){process.exit(0)}dir=parent}\"",
             "timeout": 60
           }
         ]
@@ -21,7 +21,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "node -e \"var s='./scripts/hooks/codex-pre-tool-use.js';require('fs').existsSync(s)&&require(s)\"",
+            "command": "node -e \"var fs=require('fs'),path=require('path');var dir=process.cwd();var rel='scripts/hooks/codex-pre-tool-use.js';for(;;){var candidate=path.join(dir,rel);var hasMarkers=fs.existsSync(path.join(dir,'AGENTS.md'))&&fs.existsSync(path.join(dir,'.codex','hooks.json'));if(hasMarkers){if(fs.existsSync(candidate)){process.chdir(dir);require(candidate)}else{process.exit(0)}break;}var parent=path.dirname(dir);if(parent===dir){process.exit(0)}dir=parent}\"",
             "timeout": 5
           }
         ]
@@ -32,7 +32,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "node -e \"var s='./scripts/hooks/pre-bash-git-push-reminder.js';require('fs').existsSync(s)&&require(s)\"",
+            "command": "node -e \"var fs=require('fs'),path=require('path');var dir=process.cwd();var rel='scripts/hooks/pre-bash-git-push-reminder.js';for(;;){var candidate=path.join(dir,rel);var hasMarkers=fs.existsSync(path.join(dir,'AGENTS.md'))&&fs.existsSync(path.join(dir,'.codex','hooks.json'));if(hasMarkers){if(fs.existsSync(candidate)){process.chdir(dir);require(candidate)}else{process.exit(0)}break;}var parent=path.dirname(dir);if(parent===dir){process.exit(0)}dir=parent}\"",
             "timeout": 5
           }
         ]
@@ -45,7 +45,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "node -e \"var s='./scripts/hooks/observe-tool.js';require('fs').existsSync(s)&&require(s)\"",
+            "command": "node -e \"var fs=require('fs'),path=require('path');var dir=process.cwd();var rel='scripts/hooks/observe-tool.js';for(;;){var candidate=path.join(dir,rel);var hasMarkers=fs.existsSync(path.join(dir,'AGENTS.md'))&&fs.existsSync(path.join(dir,'.codex','hooks.json'));if(hasMarkers){if(fs.existsSync(candidate)){process.chdir(dir);require(candidate)}else{process.exit(0)}break;}var parent=path.dirname(dir);if(parent===dir){process.exit(0)}dir=parent}\"",
             "timeout": 5
           }
         ]
@@ -53,32 +53,12 @@
     ],
     "Stop": [
       {
-        "description": "Persist session summary for next-session context.",
+        "description": "Persist session summary and run Stop cleanup through a single Codex-safe wrapper.",
         "hooks": [
           {
             "type": "command",
-            "command": "node -e \"var s='./scripts/hooks/session-stop.js';require('fs').existsSync(s)&&require(s)\"",
-            "timeout": 10
-          }
-        ]
-      },
-      {
-        "description": "Delete temporary safety backups for this session.",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "node ./scripts/hooks/safety-backup.js cleanup",
-            "timeout": 10
-          }
-        ]
-      },
-      {
-        "description": "Delete temporary async typecheck state for this session.",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "node ./scripts/hooks/post-edit-typecheck.js cleanup",
-            "timeout": 10
+            "command": "node -e \"var fs=require('fs'),path=require('path');var dir=process.cwd();var rel='scripts/hooks/codex-stop.js';for(;;){var candidate=path.join(dir,rel);var hasMarkers=fs.existsSync(path.join(dir,'AGENTS.md'))&&fs.existsSync(path.join(dir,'.codex','hooks.json'));if(hasMarkers){if(fs.existsSync(candidate)){process.chdir(dir);var mod=require(candidate);if(mod&&typeof mod.main==='function'){mod.main()}}else{process.exit(0)}break;}var parent=path.dirname(dir);if(parent===dir){process.exit(0)}dir=parent}\"",
+            "timeout": 30
           }
         ]
       }
