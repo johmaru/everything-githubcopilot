@@ -2,6 +2,7 @@ const assert = require('assert');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
+const { execSync } = require('child_process');
 const Module = require('module');
 
 function test(name, fn) {
@@ -56,6 +57,7 @@ function runSessionStart({ cwd, payload, dbStub, moduleOverrides = {} }) {
     const originalExit = process.exit;
     const emitted = [];
     let exitCode = null;
+    let usedExplicitExit = false;
 
     class ExitSignal extends Error {
         constructor(code) {
@@ -104,11 +106,15 @@ function runSessionStart({ cwd, payload, dbStub, moduleOverrides = {} }) {
         };
 
         process.exit = (code = 0) => {
+            usedExplicitExit = true;
             exitCode = code;
             throw new ExitSignal(code);
         };
 
         require(resolvedScriptPath);
+        if (exitCode === null) {
+            exitCode = 0;
+        }
     } catch (err) {
         if (!(err instanceof ExitSignal)) {
             throw err;
@@ -121,7 +127,7 @@ function runSessionStart({ cwd, payload, dbStub, moduleOverrides = {} }) {
         delete require.cache[resolvedDbPath];
     }
 
-    return { emitted, exitCode };
+    return { emitted, exitCode, usedExplicitExit };
 }
 
 console.log('session-start.js hook tests');
@@ -147,6 +153,7 @@ results.push(
             });
 
             assert.strictEqual(result.exitCode, 0);
+            assert.strictEqual(result.usedExplicitExit, false, 'success path should flush and exit naturally');
             assert.strictEqual(result.emitted.length, 1, 'real DB fallback should emit one JSON payload');
 
             const output = JSON.parse(result.emitted[0]);
@@ -709,6 +716,106 @@ results.push(
             assert.strictEqual(result.emitted.length, 1);
             assert.ok(!fileExists(path.join(testDir, '.github', 'sessions', 'checkpoint.md')));
             assert.ok(!fileExists(path.join(testDir, '.github', 'sessions', 'compact-snapshot.md')));
+        } finally {
+            cleanupTestDir(testDir);
+        }
+    })
+);
+
+results.push(
+    test('the shipped .codex SessionStart command emits a valid SessionStart JSON payload', () => {
+        const testDir = createTestDir();
+
+        try {
+            const hooksConfig = JSON.parse(
+                fs.readFileSync(path.join(__dirname, '..', '..', '.codex', 'hooks.json'), 'utf8')
+            );
+            const sessionStartCommand = hooksConfig.hooks.SessionStart[0].hooks[0].command;
+            const scriptsDir = path.join(testDir, 'scripts', 'hooks');
+            const transcriptPath = path.join(testDir, 'transcript.jsonl');
+
+            fs.mkdirSync(path.join(testDir, '.codex'), { recursive: true });
+            fs.mkdirSync(path.join(testDir, '.github', 'sessions'), { recursive: true });
+            fs.mkdirSync(scriptsDir, { recursive: true });
+            fs.writeFileSync(path.join(testDir, 'AGENTS.md'), '# test\n', 'utf8');
+            fs.writeFileSync(path.join(testDir, '.codex', 'hooks.json'), JSON.stringify(hooksConfig, null, 2), 'utf8');
+            fs.writeFileSync(path.join(testDir, '.github', 'sessions', 'latest-summary.md'), 'Recovered from markdown fallback.\n', 'utf8');
+            fs.writeFileSync(transcriptPath, '', 'utf8');
+            fs.writeFileSync(path.join(scriptsDir, '_shared.js'), [
+                'function getContext() {',
+                '  const raw = process.stdin.isTTY ? "" : require("fs").readFileSync(0, "utf8");',
+                '  return { raw, payload: raw.trim() ? JSON.parse(raw) : {} };',
+                '}',
+                'function fileExists(filePath) {',
+                '  try {',
+                '    return require("fs").statSync(filePath).isFile();',
+                '  } catch {',
+                '    return false;',
+                '  }',
+                '}',
+                'function readFile(filePath) {',
+                '  try {',
+                '    return require("fs").readFileSync(filePath, "utf8");',
+                '  } catch {',
+                '    return null;',
+                '  }',
+                '}',
+                'function emit(message) {',
+                '  process.stdout.write(`${message}\\n`);',
+                '}',
+                'module.exports = { emit, fileExists, getContext, readFile };',
+                '',
+            ].join('\n'), 'utf8');
+            fs.copyFileSync(
+                path.join(__dirname, '..', '..', 'scripts', 'hooks', 'session-start.js'),
+                path.join(scriptsDir, 'session-start.js')
+            );
+            fs.writeFileSync(path.join(scriptsDir, 'db.js'), 'module.exports = { open() { return null; } };\n', 'utf8');
+
+            const stdout = execSync(sessionStartCommand, {
+                cwd: testDir,
+                encoding: 'utf8',
+                input: JSON.stringify({
+                    cwd: testDir,
+                    hook_event_name: 'SessionStart',
+                    model: 'gpt-5',
+                    permission_mode: 'on-request',
+                    session_id: 'sess-shipped-session-start',
+                    source: 'startup',
+                    transcript_path: transcriptPath,
+                }),
+                shell: true,
+            });
+
+            const output = JSON.parse(stdout.trim());
+            assert.strictEqual(output.hookSpecificOutput.hookEventName, 'SessionStart');
+            assert.ok(output.hookSpecificOutput.additionalContext.includes('Recovered from markdown fallback.'));
+        } finally {
+            cleanupTestDir(testDir);
+        }
+    })
+);
+
+results.push(
+    test('prefers snake_case session_id payload when persisting the current session id', () => {
+        const testDir = createTestDir();
+
+        try {
+            const result = runSessionStart({
+                cwd: testDir,
+                payload: { session_id: 'sess-snake-case' },
+                dbStub: {
+                    open() {
+                        return null;
+                    },
+                },
+            });
+
+            assert.strictEqual(result.exitCode, 0);
+            assert.strictEqual(
+                fs.readFileSync(path.join(testDir, '.github', 'sessions', '.current-session-id'), 'utf8'),
+                'sess-snake-case'
+            );
         } finally {
             cleanupTestDir(testDir);
         }

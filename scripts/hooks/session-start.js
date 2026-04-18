@@ -7,8 +7,8 @@
  * Queries SQLite for recent session summaries and pending tasks.
  * Falls back to `.github/sessions/latest-summary.md` when the DB is unavailable.
  *
- * Input (stdin JSON): { sessionId, timestamp, cwd, hookEventName, transcript_path }
- * Output (stdout JSON): { hookSpecificOutput: { additionalContext: "..." } }
+ * Input (stdin JSON): { session_id|sessionId, cwd, transcript_path, hook_event_name|hookEventName, ... }
+ * Output (stdout JSON): { hookSpecificOutput: { hookEventName: "SessionStart", additionalContext: "..." } }
  */
 
 const fs = require('fs');
@@ -57,9 +57,10 @@ function buildArtifactSection(title, filePath) {
 }
 
 const context = getContext();
+const payload = context.payload && typeof context.payload === 'object' ? context.payload : {};
 
 // Resolve session ID: payload > generate UUID, then persist for session-stop
-const sessionId = (context.payload && context.payload.sessionId) || crypto.randomUUID();
+const sessionId = payload.session_id || payload.sessionId || crypto.randomUUID();
 try {
   fs.mkdirSync(SESSIONS_DIR, { recursive: true });
   fs.writeFileSync(SESSION_ID_FILE, sessionId, 'utf8');
@@ -210,6 +211,7 @@ if (consumedArtifacts.length > 0 || activeTaskCount > 0 || displayedTaskCount > 
 
 const output = {
   hookSpecificOutput: {
+    hookEventName: 'SessionStart',
     additionalContext: parts.join('\n\n'),
   },
 };
@@ -223,4 +225,3 @@ for (const filePath of artifactPathsToDelete) {
     // non-fatal — session-start should still succeed if cleanup fails
   }
 }
-process.exit(0);

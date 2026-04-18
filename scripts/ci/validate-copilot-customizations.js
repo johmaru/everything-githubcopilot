@@ -23,6 +23,9 @@ const KNOWLEDGE_AUDIT_PROMPT = path.join(PROMPTS_DIR, 'knowledge-audit.prompt.md
 const VERIFY_PROMPT = path.join(PROMPTS_DIR, 'verify.prompt.md');
 const CODER_AGENT = path.join(AGENTS_DIR, 'coder.agent.md');
 const SAFETY_CHECKER_AGENT = path.join(AGENTS_DIR, 'safety-checker.agent.md');
+const EXPECTED_CODEX_SESSION_START_MATCHER = 'startup|resume';
+const EXPECTED_CODEX_SESSION_START_COMMAND = `node -e "var fs=require('fs'),path=require('path');var dir=process.cwd();var rel='scripts/hooks/session-start.js';for(;;){var candidate=path.join(dir,rel);var hasMarkers=fs.existsSync(path.join(dir,'AGENTS.md'))&&fs.existsSync(path.join(dir,'.codex','hooks.json'));if(hasMarkers){if(fs.existsSync(candidate)){process.chdir(dir);require(candidate)}else{process.exit(0)}break;}var parent=path.dirname(dir);if(parent===dir){process.exit(0)}dir=parent}"`;
+const EXPECTED_CODEX_SESSION_START_TIMEOUT = 60;
 const EXPECTED_CODEX_STOP_COMMAND = `node -e "var fs=require('fs'),path=require('path');var dir=process.cwd();var rel='scripts/hooks/codex-stop.js';for(;;){var candidate=path.join(dir,rel);var hasMarkers=fs.existsSync(path.join(dir,'AGENTS.md'))&&fs.existsSync(path.join(dir,'.codex','hooks.json'));if(hasMarkers){if(fs.existsSync(candidate)){process.chdir(dir);var mod=require(candidate);if(mod&&typeof mod.main==='function'){mod.main()}}else{process.exit(0)}break;}var parent=path.dirname(dir);if(parent===dir){process.exit(0)}dir=parent}"`;
 const EXPECTED_CODEX_STOP_TIMEOUT = 30;
 
@@ -853,6 +856,38 @@ function validateCodexContracts(errors) {
       hooksConfig = JSON.parse(readUtf8(codexHooks));
     } catch (error) {
       errors.push(`ERROR: P1-012: .codex/hooks.json must contain valid JSON (${error.message})`);
+    }
+
+    if (hooksConfig && (!hooksConfig.hooks || !Array.isArray(hooksConfig.hooks.SessionStart) || hooksConfig.hooks.SessionStart.length === 0)) {
+      errors.push('ERROR: P1-012: .codex/hooks.json must define SessionStart as the shipped session-start.js command');
+    }
+
+    if (hooksConfig && hooksConfig.hooks && Array.isArray(hooksConfig.hooks.SessionStart)) {
+      const sessionStartEntries = hooksConfig.hooks.SessionStart;
+      const primarySessionStartEntry = sessionStartEntries[0] || null;
+      const sessionStartMatcher = primarySessionStartEntry && typeof primarySessionStartEntry.matcher === 'string'
+        ? primarySessionStartEntry.matcher
+        : '';
+      const sessionStartHooks = primarySessionStartEntry && Array.isArray(primarySessionStartEntry.hooks)
+        ? primarySessionStartEntry.hooks
+        : [];
+      const sessionStartCommandEntry = sessionStartHooks.length === 1 && sessionStartHooks[0] && sessionStartHooks[0].type === 'command'
+        ? sessionStartHooks[0]
+        : null;
+      const sessionStartCommand = sessionStartCommandEntry && typeof sessionStartCommandEntry.command === 'string'
+        ? sessionStartCommandEntry.command
+        : '';
+
+      if (
+        sessionStartEntries.length !== 1
+        || sessionStartMatcher !== EXPECTED_CODEX_SESSION_START_MATCHER
+        || sessionStartHooks.length !== 1
+        || !sessionStartCommand
+        || sessionStartCommand !== EXPECTED_CODEX_SESSION_START_COMMAND
+        || sessionStartCommandEntry.timeout !== EXPECTED_CODEX_SESSION_START_TIMEOUT
+      ) {
+        errors.push('ERROR: P1-012: .codex/hooks.json SessionStart must keep matcher startup|resume and the shipped session-start.js command/timeout so Codex receives valid SessionStart output');
+      }
     }
 
     if (hooksConfig && (!hooksConfig.hooks || !Array.isArray(hooksConfig.hooks.Stop) || hooksConfig.hooks.Stop.length === 0)) {

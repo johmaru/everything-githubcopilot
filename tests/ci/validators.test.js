@@ -12,6 +12,7 @@ const { execFileSync, execSync } = require('child_process');
 
 const repoRoot = path.join(__dirname, '..', '..');
 const validatorsDir = path.join(repoRoot, 'scripts', 'ci');
+const SHIPPED_CODEX_SESSION_START_COMMAND = `node -e "var fs=require('fs'),path=require('path');var dir=process.cwd();var rel='scripts/hooks/session-start.js';for(;;){var candidate=path.join(dir,rel);var hasMarkers=fs.existsSync(path.join(dir,'AGENTS.md'))&&fs.existsSync(path.join(dir,'.codex','hooks.json'));if(hasMarkers){if(fs.existsSync(candidate)){process.chdir(dir);require(candidate)}else{process.exit(0)}break;}var parent=path.dirname(dir);if(parent===dir){process.exit(0)}dir=parent}"`;
 const SHIPPED_CODEX_STOP_COMMAND = `node -e "var fs=require('fs'),path=require('path');var dir=process.cwd();var rel='scripts/hooks/codex-stop.js';for(;;){var candidate=path.join(dir,rel);var hasMarkers=fs.existsSync(path.join(dir,'AGENTS.md'))&&fs.existsSync(path.join(dir,'.codex','hooks.json'));if(hasMarkers){if(fs.existsSync(candidate)){process.chdir(dir);var mod=require(candidate);if(mod&&typeof mod.main==='function'){mod.main()}}else{process.exit(0)}break;}var parent=path.dirname(dir);if(parent===dir){process.exit(0)}dir=parent}"`;
 let packedFilePathsCache = null;
 
@@ -216,13 +217,25 @@ function writeCodexCompatibilitySurface(testDir, options = {}) {
     includeHooks = true,
     hooksJson = JSON.stringify({
       hooks: {
+        SessionStart: [
+          {
+            matcher: 'startup|resume',
+            hooks: [
+              {
+                type: 'command',
+                command: SHIPPED_CODEX_SESSION_START_COMMAND,
+                timeout: 60,
+              },
+            ],
+          },
+        ],
         Stop: [
           {
             hooks: [
               {
                 type: 'command',
                 command: SHIPPED_CODEX_STOP_COMMAND,
-                  timeout: 30,
+                timeout: 30,
               },
             ],
           },
@@ -2403,7 +2416,22 @@ results.push(test('validate-copilot-customizations rejects .codex hooks that omi
     writeMinimalRepoFixtures(testDir);
     writeCodexCompatibilitySurface(testDir, {
       createSkillsBridge: true,
-      hooksJson: JSON.stringify({ hooks: {} }, null, 2),
+      hooksJson: JSON.stringify({
+        hooks: {
+          SessionStart: [
+            {
+              matcher: 'startup|resume',
+              hooks: [
+                {
+                  type: 'command',
+                  command: SHIPPED_CODEX_SESSION_START_COMMAND,
+                  timeout: 60,
+                },
+              ],
+            },
+          ],
+        },
+      }, null, 2),
     });
 
     const result = runValidatorWithOverrides('validate-copilot-customizations', {
@@ -2424,6 +2452,47 @@ results.push(test('validate-copilot-customizations rejects .codex hooks that omi
   }
 }));
 
+results.push(test('validate-copilot-customizations rejects .codex hooks that omit SessionStart entirely', () => {
+  const testDir = createTestDir();
+  try {
+    writeMinimalRepoFixtures(testDir);
+    writeCodexCompatibilitySurface(testDir, {
+      createSkillsBridge: true,
+      hooksJson: JSON.stringify({
+        hooks: {
+          Stop: [
+            {
+              hooks: [
+                {
+                  type: 'command',
+                  command: SHIPPED_CODEX_STOP_COMMAND,
+                  timeout: 30,
+                },
+              ],
+            },
+          ],
+        },
+      }, null, 2),
+    });
+
+    const result = runValidatorWithOverrides('validate-copilot-customizations', {
+      ROOT: testDir,
+      GITHUB_DIR: path.join(testDir, '.github'),
+      README_PATH: path.join(testDir, 'README.md'),
+      COPILOT_INSTRUCTIONS: path.join(testDir, '.github', 'copilot-instructions.md'),
+      INSTRUCTIONS_DIR: path.join(testDir, '.github', 'instructions'),
+      PROMPTS_DIR: path.join(testDir, '.github', 'prompts'),
+      AGENTS_DIR: path.join(testDir, '.github', 'agents'),
+    });
+
+    assert.strictEqual(result.code, 1, 'should fail when SessionStart is omitted from .codex/hooks.json');
+    assert.ok(result.stderr.includes('P1-012'), 'should report the Codex contract rule id');
+    assert.ok(result.stderr.includes('SessionStart'), 'should mention the missing SessionStart contract');
+  } finally {
+    cleanupTestDir(testDir);
+  }
+}));
+
 results.push(test('validate-copilot-customizations rejects Stop commands that drift from the shipped codex-stop wrapper command', () => {
   const testDir = createTestDir();
   try {
@@ -2432,6 +2501,18 @@ results.push(test('validate-copilot-customizations rejects Stop commands that dr
       createSkillsBridge: true,
       hooksJson: JSON.stringify({
         hooks: {
+          SessionStart: [
+            {
+              matcher: 'startup|resume',
+              hooks: [
+                {
+                  type: 'command',
+                  command: SHIPPED_CODEX_SESSION_START_COMMAND,
+                  timeout: 60,
+                },
+              ],
+            },
+          ],
           Stop: [
             {
               hooks: [
@@ -2460,6 +2541,219 @@ results.push(test('validate-copilot-customizations rejects Stop commands that dr
     assert.strictEqual(result.code, 1, 'should fail when the Stop wrapper command drifts from the shipped contract');
     assert.ok(result.stderr.includes('P1-012'), 'should report the Codex contract rule id');
     assert.ok(result.stderr.includes('codex-stop'), 'should identify the Stop wrapper contract');
+  } finally {
+    cleanupTestDir(testDir);
+  }
+}));
+
+results.push(test('validate-copilot-customizations rejects SessionStart commands that drift from the shipped session-start command', () => {
+  const testDir = createTestDir();
+  try {
+    writeMinimalRepoFixtures(testDir);
+    writeCodexCompatibilitySurface(testDir, {
+      createSkillsBridge: true,
+      hooksJson: JSON.stringify({
+        hooks: {
+          SessionStart: [
+            {
+              matcher: 'startup|resume',
+              hooks: [
+                {
+                  type: 'command',
+                  command: `${SHIPPED_CODEX_SESSION_START_COMMAND} && echo unexpected`,
+                  timeout: 60,
+                },
+              ],
+            },
+          ],
+          Stop: [
+            {
+              hooks: [
+                {
+                  type: 'command',
+                  command: SHIPPED_CODEX_STOP_COMMAND,
+                  timeout: 30,
+                },
+              ],
+            },
+          ],
+        },
+      }, null, 2),
+    });
+
+    const result = runValidatorWithOverrides('validate-copilot-customizations', {
+      ROOT: testDir,
+      GITHUB_DIR: path.join(testDir, '.github'),
+      README_PATH: path.join(testDir, 'README.md'),
+      COPILOT_INSTRUCTIONS: path.join(testDir, '.github', 'copilot-instructions.md'),
+      INSTRUCTIONS_DIR: path.join(testDir, '.github', 'instructions'),
+      PROMPTS_DIR: path.join(testDir, '.github', 'prompts'),
+      AGENTS_DIR: path.join(testDir, '.github', 'agents'),
+    });
+
+    assert.strictEqual(result.code, 1, 'should fail when the SessionStart command drifts from the shipped contract');
+    assert.ok(result.stderr.includes('P1-012'), 'should report the Codex contract rule id');
+    assert.ok(result.stderr.includes('SessionStart'), 'should identify the SessionStart contract');
+  } finally {
+    cleanupTestDir(testDir);
+  }
+}));
+
+results.push(test('validate-copilot-customizations rejects SessionStart timeouts that drift from the shipped contract', () => {
+  const testDir = createTestDir();
+  try {
+    writeMinimalRepoFixtures(testDir);
+    writeCodexCompatibilitySurface(testDir, {
+      createSkillsBridge: true,
+      hooksJson: JSON.stringify({
+        hooks: {
+          SessionStart: [
+            {
+              matcher: 'startup|resume',
+              hooks: [
+                {
+                  type: 'command',
+                  command: SHIPPED_CODEX_SESSION_START_COMMAND,
+                  timeout: 5,
+                },
+              ],
+            },
+          ],
+          Stop: [
+            {
+              hooks: [
+                {
+                  type: 'command',
+                  command: SHIPPED_CODEX_STOP_COMMAND,
+                  timeout: 30,
+                },
+              ],
+            },
+          ],
+        },
+      }, null, 2),
+    });
+
+    const result = runValidatorWithOverrides('validate-copilot-customizations', {
+      ROOT: testDir,
+      GITHUB_DIR: path.join(testDir, '.github'),
+      README_PATH: path.join(testDir, 'README.md'),
+      COPILOT_INSTRUCTIONS: path.join(testDir, '.github', 'copilot-instructions.md'),
+      INSTRUCTIONS_DIR: path.join(testDir, '.github', 'instructions'),
+      PROMPTS_DIR: path.join(testDir, '.github', 'prompts'),
+      AGENTS_DIR: path.join(testDir, '.github', 'agents'),
+    });
+
+    assert.strictEqual(result.code, 1, 'should fail when the SessionStart timeout drifts from the shipped contract');
+    assert.ok(result.stderr.includes('P1-012'), 'should report the Codex contract rule id');
+    assert.ok(result.stderr.includes('SessionStart'), 'should identify the SessionStart contract');
+  } finally {
+    cleanupTestDir(testDir);
+  }
+}));
+
+results.push(test('validate-copilot-customizations rejects SessionStart matchers that drift from startup|resume', () => {
+  const testDir = createTestDir();
+  try {
+    writeMinimalRepoFixtures(testDir);
+    writeCodexCompatibilitySurface(testDir, {
+      createSkillsBridge: true,
+      hooksJson: JSON.stringify({
+        hooks: {
+          SessionStart: [
+            {
+              matcher: 'startup',
+              hooks: [
+                {
+                  type: 'command',
+                  command: SHIPPED_CODEX_SESSION_START_COMMAND,
+                  timeout: 60,
+                },
+              ],
+            },
+          ],
+          Stop: [
+            {
+              hooks: [
+                {
+                  type: 'command',
+                  command: SHIPPED_CODEX_STOP_COMMAND,
+                  timeout: 30,
+                },
+              ],
+            },
+          ],
+        },
+      }, null, 2),
+    });
+
+    const result = runValidatorWithOverrides('validate-copilot-customizations', {
+      ROOT: testDir,
+      GITHUB_DIR: path.join(testDir, '.github'),
+      README_PATH: path.join(testDir, 'README.md'),
+      COPILOT_INSTRUCTIONS: path.join(testDir, '.github', 'copilot-instructions.md'),
+      INSTRUCTIONS_DIR: path.join(testDir, '.github', 'instructions'),
+      PROMPTS_DIR: path.join(testDir, '.github', 'prompts'),
+      AGENTS_DIR: path.join(testDir, '.github', 'agents'),
+    });
+
+    assert.strictEqual(result.code, 1, 'should fail when the SessionStart matcher drifts from startup|resume');
+    assert.ok(result.stderr.includes('P1-012'), 'should report the Codex contract rule id');
+    assert.ok(result.stderr.includes('SessionStart'), 'should identify the SessionStart contract');
+    assert.ok(result.stderr.includes('startup|resume'), 'should mention the required matcher');
+  } finally {
+    cleanupTestDir(testDir);
+  }
+}));
+
+results.push(test('validate-copilot-customizations rejects SessionStart matchers with surrounding whitespace', () => {
+  const testDir = createTestDir();
+  try {
+    writeMinimalRepoFixtures(testDir);
+    writeCodexCompatibilitySurface(testDir, {
+      createSkillsBridge: true,
+      hooksJson: JSON.stringify({
+        hooks: {
+          SessionStart: [
+            {
+              matcher: ' startup|resume ',
+              hooks: [
+                {
+                  type: 'command',
+                  command: SHIPPED_CODEX_SESSION_START_COMMAND,
+                  timeout: 60,
+                },
+              ],
+            },
+          ],
+          Stop: [
+            {
+              hooks: [
+                {
+                  type: 'command',
+                  command: SHIPPED_CODEX_STOP_COMMAND,
+                  timeout: 30,
+                },
+              ],
+            },
+          ],
+        },
+      }, null, 2),
+    });
+
+    const result = runValidatorWithOverrides('validate-copilot-customizations', {
+      ROOT: testDir,
+      GITHUB_DIR: path.join(testDir, '.github'),
+      README_PATH: path.join(testDir, 'README.md'),
+      COPILOT_INSTRUCTIONS: path.join(testDir, '.github', 'copilot-instructions.md'),
+      INSTRUCTIONS_DIR: path.join(testDir, '.github', 'instructions'),
+      PROMPTS_DIR: path.join(testDir, '.github', 'prompts'),
+      AGENTS_DIR: path.join(testDir, '.github', 'agents'),
+    });
+
+    assert.strictEqual(result.code, 1, 'should fail when the SessionStart matcher contains surrounding whitespace');
+    assert.ok(result.stderr.includes('P1-012'), 'should report the Codex contract rule id');
+    assert.ok(result.stderr.includes('startup|resume'), 'should mention the required matcher');
   } finally {
     cleanupTestDir(testDir);
   }
