@@ -201,6 +201,38 @@ results.push(
 );
 
 results.push(
+    test('falls back to markdown summary when opening the DB throws', () => {
+        const testDir = createTestDir();
+
+        try {
+            const sessionsDir = path.join(testDir, '.github', 'sessions');
+            const summaryPath = path.join(sessionsDir, 'latest-summary.md');
+            fs.mkdirSync(sessionsDir, { recursive: true });
+            fs.writeFileSync(summaryPath, 'Recovered after DB open failure.\n');
+
+            const result = runSessionStart({
+                cwd: testDir,
+                payload: { sessionId: 'sess-db-open-failure' },
+                dbStub: {
+                    open() {
+                        throw new Error('database disk image is malformed');
+                    },
+                },
+            });
+
+            assert.strictEqual(result.exitCode, 0);
+            assert.strictEqual(result.emitted.length, 1, 'DB exceptions should still produce valid SessionStart JSON');
+
+            const output = JSON.parse(result.emitted[0]);
+            assert.strictEqual(output.hookSpecificOutput.hookEventName, 'SessionStart');
+            assert.ok(output.hookSpecificOutput.additionalContext.includes('Recovered after DB open failure.'));
+        } finally {
+            cleanupTestDir(testDir);
+        }
+    })
+);
+
+results.push(
     test('returns no output when neither DB nor markdown fallback is available', () => {
         const testDir = createTestDir();
 

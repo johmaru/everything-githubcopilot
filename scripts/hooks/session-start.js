@@ -59,6 +59,20 @@ function buildArtifactSection(title, filePath) {
 const context = getContext();
 const payload = context.payload && typeof context.payload === 'object' ? context.payload : {};
 
+function appendMarkdownFallback() {
+  if (!fileExists(SUMMARY_FILE)) {
+    return false;
+  }
+
+  const summary = readFile(SUMMARY_FILE);
+  if (!summary || !summary.trim()) {
+    return false;
+  }
+
+  parts.push(`## Prior Session Summary\n\n${summary.trim()}`);
+  return true;
+}
+
 // Resolve session ID: payload > generate UUID, then persist for session-stop
 const sessionId = payload.session_id || payload.sessionId || crypto.randomUUID();
 try {
@@ -85,109 +99,117 @@ if (compactSnapshotSection) {
   consumedArtifacts.push(compactSnapshotSection.artifactName);
 }
 
-// Try SQLite first, fall back to markdown
-const handle = db.open();
+// Try SQLite first, fall back to markdown. SessionStart must never leak
+// diagnostics to stdout because Codex parses this hook's output at startup.
+let handle = null;
+try {
+  handle = db.open();
 
-if (handle) {
-  const projectId = db.detectProjectId(process.cwd());
+  if (handle) {
+    const projectId = db.detectProjectId(process.cwd());
 
-  // Register this session
-  db.upsertSession(handle, {
-    id: sessionId,
-    startedAt: new Date().toISOString(),
-    projectId,
-  });
-
-  // Fetch recent session summaries (same project first)
-  const recent = db.getRecentProjectSessions(handle, { projectId, limit: 3 });
-  if (recent.length > 0) {
-    const summaryLines = recent.map((s) => {
-      const branch = s.branch ? ` (branch: ${s.branch})` : '';
-      return `### ${s.ended_at || s.started_at}${branch}\n\n${s.summary}`;
-    });
-    parts.push(`## Prior Session Summaries\n\n${summaryLines.join('\n\n---\n\n')}`);
-  }
-
-  // Fetch pending tasks
-  const tasks = db.getPendingTasks(handle, { projectId });
-  displayedTaskCount = tasks.length;
-  activeTaskCount = typeof db.countPendingTasks === 'function'
-    ? db.countPendingTasks(handle, { projectId })
-    : displayedTaskCount;
-  if (tasks.length > 0) {
-    const taskLines = tasks.map((task) => formatTaskLine(task));
-    parts.push(`## Active Tasks\n\n${taskLines.join('\n')}`);
-  }
-
-  // ── Smart knowledge retrieval ──
-  // 1. Collect search hints from environment: branch, cwd basename, recent files
-  const searchHints = [];
-
-  try {
-    const branch = require('child_process')
-      .execSync('git branch --show-current', { cwd: process.cwd(), timeout: 3000, encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'] })
-      .trim();
-    if (branch) searchHints.push(branch);
-  } catch { /* not a git repo */ }
-
-  const cwdBase = path.basename(process.cwd());
-  if (cwdBase) searchHints.push(cwdBase);
-
-  // Recent file paths from last session's session_files
-  try {
-    const recentFiles = handle.prepare(`
-      SELECT DISTINCT sf.file_path FROM session_files sf
-      INNER JOIN sessions s ON s.id = sf.session_id
-      ORDER BY s.started_at DESC LIMIT 10
-    `).all();
-    for (const f of recentFiles) {
-      const base = path.basename(f.file_path, path.extname(f.file_path));
-      if (base && base.length > 2) searchHints.push(base);
-    }
-  } catch { /* non-fatal */ }
-
-  // 2. Keyword-matched knowledge (branch, filenames, project name)
-  const uniqueHints = [...new Set(searchHints)].slice(0, 8);
-  let knowledge = [];
-
-  if (uniqueHints.length > 0) {
-    knowledge = db.searchKnowledgeByKeywords(handle, uniqueHints, { projectId, limit: 8 });
-  }
-
-  // 3. Fill remaining slots with project-scoped, confidence-filtered knowledge
-  if (knowledge.length < 8) {
-    const seenIds = new Set(knowledge.map((k) => k.id));
-    const projectKnowledge = db.getProjectKnowledge(handle, {
+    // Register this session
+    db.upsertSession(handle, {
+      id: sessionId,
+      startedAt: new Date().toISOString(),
       projectId,
-      minConfidence: 0.4,
-      limit: 8,
     });
-    for (const k of projectKnowledge) {
-      if (knowledge.length >= 8) {
-        break;
-      }
 
-      if (!seenIds.has(k.id)) {
-        knowledge.push(k);
-        seenIds.add(k.id);
+    // Fetch recent session summaries (same project first)
+    const recent = db.getRecentProjectSessions(handle, { projectId, limit: 3 });
+    if (recent.length > 0) {
+      const summaryLines = recent.map((s) => {
+        const branch = s.branch ? ` (branch: ${s.branch})` : '';
+        return `### ${s.ended_at || s.started_at}${branch}\n\n${s.summary}`;
+      });
+      parts.push(`## Prior Session Summaries\n\n${summaryLines.join('\n\n---\n\n')}`);
+    }
+
+    // Fetch pending tasks
+    const tasks = db.getPendingTasks(handle, { projectId });
+    displayedTaskCount = tasks.length;
+    activeTaskCount = typeof db.countPendingTasks === 'function'
+      ? db.countPendingTasks(handle, { projectId })
+      : displayedTaskCount;
+    if (tasks.length > 0) {
+      const taskLines = tasks.map((task) => formatTaskLine(task));
+      parts.push(`## Active Tasks\n\n${taskLines.join('\n')}`);
+    }
+
+    // Smart knowledge retrieval:
+    // 1. Collect search hints from environment: branch, cwd basename, recent files
+    const searchHints = [];
+
+    try {
+      const branch = require('child_process')
+        .execSync('git branch --show-current', { cwd: process.cwd(), timeout: 3000, encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'] })
+        .trim();
+      if (branch) searchHints.push(branch);
+    } catch { /* not a git repo */ }
+
+    const cwdBase = path.basename(process.cwd());
+    if (cwdBase) searchHints.push(cwdBase);
+
+    // Recent file paths from last session's session_files
+    try {
+      const recentFiles = handle.prepare(`
+        SELECT DISTINCT sf.file_path FROM session_files sf
+        INNER JOIN sessions s ON s.id = sf.session_id
+        ORDER BY s.started_at DESC LIMIT 10
+      `).all();
+      for (const f of recentFiles) {
+        const base = path.basename(f.file_path, path.extname(f.file_path));
+        if (base && base.length > 2) searchHints.push(base);
+      }
+    } catch { /* non-fatal */ }
+
+    // 2. Keyword-matched knowledge (branch, filenames, project name)
+    const uniqueHints = [...new Set(searchHints)].slice(0, 8);
+    let knowledge = [];
+
+    if (uniqueHints.length > 0) {
+      knowledge = db.searchKnowledgeByKeywords(handle, uniqueHints, { projectId, limit: 8 });
+    }
+
+    // 3. Fill remaining slots with project-scoped, confidence-filtered knowledge
+    if (knowledge.length < 8) {
+      const seenIds = new Set(knowledge.map((k) => k.id));
+      const projectKnowledge = db.getProjectKnowledge(handle, {
+        projectId,
+        minConfidence: 0.4,
+        limit: 8,
+      });
+      for (const k of projectKnowledge) {
+        if (knowledge.length >= 8) {
+          break;
+        }
+
+        if (!seenIds.has(k.id)) {
+          knowledge.push(k);
+          seenIds.add(k.id);
+        }
       }
     }
-  }
 
-  if (knowledge.length > 0) {
-    const knowledgeLines = knowledge.map((k) => {
-      const conf = typeof k.confidence === 'number' ? ` [${Math.round(k.confidence * 100)}%]` : '';
-      return `- **[${k.kind}]**${conf} ${k.content} _(${k.source})_`;
-    });
-    parts.push(`## Accumulated Knowledge\n\n${knowledgeLines.join('\n')}`);
+    if (knowledge.length > 0) {
+      const knowledgeLines = knowledge.map((k) => {
+        const conf = typeof k.confidence === 'number' ? ` [${Math.round(k.confidence * 100)}%]` : '';
+        return `- **[${k.kind}]**${conf} ${k.content} _(${k.source})_`;
+      });
+      parts.push(`## Accumulated Knowledge\n\n${knowledgeLines.join('\n')}`);
+    }
+  } else {
+    appendMarkdownFallback();
   }
-
-  db.close();
-} else if (fileExists(SUMMARY_FILE)) {
-  // Markdown fallback
-  const summary = readFile(SUMMARY_FILE);
-  if (summary && summary.trim()) {
-    parts.push(`## Prior Session Summary\n\n${summary.trim()}`);
+} catch {
+  appendMarkdownFallback();
+} finally {
+  if (handle) {
+    try {
+      db.close();
+    } catch {
+      // non-fatal — this hook must keep startup output parseable
+    }
   }
 }
 
