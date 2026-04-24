@@ -3,28 +3,37 @@
  * Everything GitHub Copilot - User-Level Installer CLI
  *
  * Usage:
- *   node scripts/installer/cli.js [install|uninstall|reinstall]
- *   npx everything-githubcopilot [install|uninstall|reinstall]
+ *   node scripts/installer/cli.js [install|uninstall|reinstall] [--provider copilot|codex|all]
+ *   npx everything-githubcopilot [install|uninstall|reinstall] [--provider copilot|codex|all]
  *
- * Manages user-level (~/.copilot/) installation of Copilot customizations.
+ * Manages user-level installation of Copilot customizations and optional Codex global assets.
  */
 
 const fs = require('fs');
 const path = require('path');
 const os = require('os');
 const { execSync } = require('child_process');
-const { getRuntimeDependencies, getUserCopilotSettings, getUserInstallManifest } = require('./manifest');
+const {
+  getRuntimeDependencies,
+  getUserCodexInstallManifest,
+  getUserCopilotSettings,
+  getUserInstallManifest,
+} = require('./manifest');
 
 const INSTALL_STATE_FILE = '.everything-githubcopilot-install.json';
+const CODEX_INSTALL_STATE_FILE = '.everything-githubcopilot-codex-install.json';
 const ALLOWED_PREEXISTING_COPILOT_ENTRIES = new Set(['ide']);
 const USER_INSTALL_MANIFEST = getUserInstallManifest();
+const USER_CODEX_INSTALL_MANIFEST = getUserCodexInstallManifest();
 const DEFAULT_MANAGED_PATHS = USER_INSTALL_MANIFEST.managedPaths;
 const RUNTIME_DEPENDENCIES = getRuntimeDependencies();
 
 function getPaths() {
   const homeDir = os.homedir();
   const copilotBase = process.env.EGCOPILOT_COPILOT_BASE || path.join(homeDir, '.copilot');
+  const codexBase = process.env.EGCOPILOT_CODEX_HOME || path.join(homeDir, '.codex');
   const stateFile = path.join(copilotBase, INSTALL_STATE_FILE);
+  const codexStateFile = path.join(codexBase, CODEX_INSTALL_STATE_FILE);
 
   let vsSettings;
   if (process.env.EGCOPILOT_VSCODE_SETTINGS) {
@@ -37,7 +46,7 @@ function getPaths() {
     vsSettings = path.join(homeDir, '.config', 'Code', 'User', 'settings.json');
   }
 
-  return { homeDir, copilotBase, stateFile, vsSettings };
+  return { homeDir, copilotBase, codexBase, codexStateFile, stateFile, vsSettings };
 }
 
 function loadInstallState(stateFile) {
@@ -273,6 +282,214 @@ function resolveManagedPath(copilotBase, relativePath) {
   return resolvedPath;
 }
 
+function resolveManagedPathInBase(basePath, relativePath, label) {
+  const resolvedPath = path.resolve(basePath, relativePath);
+  const relativeToBase = path.relative(basePath, resolvedPath);
+
+  if (relativeToBase.startsWith('..') || path.isAbsolute(relativeToBase)) {
+    throw new Error(`Refusing to remove managed path outside the ${label} directory: ${relativePath}`);
+  }
+
+  return resolvedPath;
+}
+
+function copyManifestOperations(repoRoot, targetBase, copyOperations) {
+  let totalCopied = 0;
+
+  for (const op of copyOperations) {
+    const srcPath = path.join(repoRoot, op.src);
+    const dstPath = path.join(targetBase, op.dst);
+
+    if (!fs.existsSync(srcPath)) {
+      console.log(`  Skipping ${op.src} (not found)`);
+      continue;
+    }
+
+    if (op.single) {
+      fs.mkdirSync(path.dirname(dstPath), { recursive: true });
+      fs.copyFileSync(srcPath, dstPath);
+      console.log(`  Copied ${op.src} -> ${op.dst}`);
+      totalCopied++;
+    } else if (op.recursive) {
+      fs.mkdirSync(dstPath, { recursive: true });
+      copyRecursive(srcPath, dstPath, op.excludeRelativePaths || []);
+      const count = countFiles(dstPath);
+      console.log(`  Copied ${op.src} -> ${op.dst} (${count} items)`);
+      totalCopied += count;
+    } else if (op.pattern) {
+      fs.mkdirSync(dstPath, { recursive: true });
+      const files = fs.readdirSync(srcPath).filter(f => f.match(op.pattern.replace('*', '.*')));
+      for (const file of files) {
+        fs.copyFileSync(path.join(srcPath, file), path.join(dstPath, file));
+      }
+      console.log(`  Copied ${files.length} files from ${op.src} -> ${op.dst}`);
+      totalCopied += files.length;
+    }
+  }
+
+  return totalCopied;
+}
+
+function getCodexPayloadRoot(codexBase) {
+  return path.join(codexBase, 'everything-githubcopilot');
+}
+
+function createCodexDependencyPackage(payloadRoot) {
+  const packageJson = path.join(payloadRoot, 'package.json');
+  fs.mkdirSync(payloadRoot, { recursive: true });
+  fs.writeFileSync(packageJson, JSON.stringify({
+    name: 'everything-githubcopilot-codex-runtime',
+    version: '1.0.0',
+    private: true,
+    description: 'Runtime dependencies for Everything GitHub Copilot Codex hooks'
+  }, null, 2));
+}
+
+function transformCodexGlobalConfig(sourceText) {
+  return sourceText.replace(/config_file = "agents\//g, 'config_file = "everything-githubcopilot/agents/');
+}
+
+function buildGlobalHookCommand(codexBase, scriptName) {
+  const absoluteScriptPath = path
+    .join(getCodexPayloadRoot(codexBase), 'scripts', 'hooks', scriptName)
+    .replace(/\\/g, '/')
+    .replace(/'/g, "\\'");
+
+  return `node -e "require('${absoluteScriptPath}')"`;
+}
+
+function transformCodexGlobalHooks(sourceText, codexBase) {
+  const hooksConfig = JSON.parse(sourceText);
+
+  for (const eventHooks of Object.values(hooksConfig.hooks || {})) {
+    if (!Array.isArray(eventHooks)) {
+      continue;
+    }
+
+    for (const entry of eventHooks) {
+      for (const hook of entry.hooks || []) {
+        if (hook.type !== 'command' || typeof hook.command !== 'string') {
+          continue;
+        }
+
+        const match = hook.command.match(/rel='scripts\/hooks\/([^']+)'/u);
+        if (match) {
+          hook.command = buildGlobalHookCommand(codexBase, match[1]);
+        }
+      }
+    }
+  }
+
+  return `${JSON.stringify(hooksConfig, null, 2)}\n`;
+}
+
+function renderCodexActiveFile(repoRoot, codexBase, operation) {
+  const sourceText = fs.readFileSync(path.join(repoRoot, operation.src), 'utf8');
+
+  switch (operation.transform) {
+    case 'codex-global-config':
+      return transformCodexGlobalConfig(sourceText);
+    case 'codex-global-hooks':
+      return transformCodexGlobalHooks(sourceText, codexBase);
+    default:
+      return sourceText;
+  }
+}
+
+function ensureSafeCodexInstallTarget(codexBase, stateFile) {
+  if (fs.existsSync(stateFile)) {
+    return;
+  }
+
+  const managedPaths = USER_CODEX_INSTALL_MANIFEST.managedPaths;
+  const existingManagedPaths = managedPaths.filter(relativePath => fs.existsSync(path.join(codexBase, relativePath)));
+  if (existingManagedPaths.length > 0) {
+    throw new Error(
+      `Refusing to install Codex assets over unmanaged ~/.codex paths. Existing entries: ${existingManagedPaths.join(', ')}`
+    );
+  }
+}
+
+function writeCodexActiveFiles(repoRoot, codexBase, state) {
+  const warnings = [];
+
+  for (const operation of USER_CODEX_INSTALL_MANIFEST.activeFiles) {
+    const targetPath = path.join(codexBase, operation.dst);
+    const hasExistingFile = fs.existsSync(targetPath);
+
+    if (hasExistingFile && !state.managedPaths.includes(operation.dst)) {
+      warnings.push(
+        `Warning: ~/.codex/${operation.dst} already exists; leaving it untouched. A managed template was installed under ~/.codex/everything-githubcopilot/.`
+      );
+      continue;
+    }
+
+    fs.mkdirSync(path.dirname(targetPath), { recursive: true });
+    fs.writeFileSync(targetPath, renderCodexActiveFile(repoRoot, codexBase, operation));
+    if (!state.managedPaths.includes(operation.dst)) {
+      state.managedPaths.push(operation.dst);
+    }
+    console.log(`  Installed active Codex ${operation.dst}`);
+  }
+
+  return warnings;
+}
+
+function installCodexDependencies(codexBase) {
+  const payloadRoot = getCodexPayloadRoot(codexBase);
+  createCodexDependencyPackage(payloadRoot);
+
+  if (process.env.EGCOPILOT_SKIP_DEP_INSTALL === '1') {
+    console.log('  Codex dependency installation skipped by EGCOPILOT_SKIP_DEP_INSTALL=1');
+    return;
+  }
+
+  try {
+    execSync(`npm install --no-audit --no-fund ${RUNTIME_DEPENDENCIES.join(' ')}`, {
+      cwd: payloadRoot,
+      stdio: 'pipe'
+    });
+    console.log('  Codex dependencies installed successfully');
+  } catch {
+    console.log('  Warning: Failed to install Codex dependencies. You can install manually:');
+    console.log(`    cd ${payloadRoot} && npm install ${RUNTIME_DEPENDENCIES.join(' ')}`);
+  }
+}
+
+function installCodex() {
+  console.log('Installing Everything GitHub Copilot Codex assets (user-level)...\n');
+
+  const { codexBase, codexStateFile } = getPaths();
+  const repoRoot = path.join(__dirname, '..', '..');
+
+  ensureSafeCodexInstallTarget(codexBase, codexStateFile);
+  fs.mkdirSync(codexBase, { recursive: true });
+
+  const state = loadInstallState(codexStateFile) || {
+    installedAt: new Date().toISOString(),
+    version: require(path.join(repoRoot, 'package.json')).version,
+    managedPaths: [...USER_CODEX_INSTALL_MANIFEST.managedPaths],
+  };
+
+  const totalCopied = copyManifestOperations(repoRoot, codexBase, USER_CODEX_INSTALL_MANIFEST.copyOperations);
+  const warnings = writeCodexActiveFiles(repoRoot, codexBase, state);
+
+  console.log('\n  Installing Codex hook dependencies...');
+  installCodexDependencies(codexBase);
+
+  saveInstallState(codexStateFile, state);
+
+  for (const warning of warnings) {
+    console.log(warning);
+  }
+
+  console.log(`\n✅ Codex user-level installation complete!`);
+  console.log(`   Location: ${codexBase}`);
+  console.log(`   State file: ${codexStateFile}`);
+  console.log(`   Copied items: ${totalCopied}`);
+  console.log('   Skills namespace: ~/.codex/skills/everything-githubcopilot');
+}
+
 function install() {
   console.log('Installing Everything GitHub Copilot (user-level)...\n');
 
@@ -309,40 +526,7 @@ function install() {
   }
 
   // Copy files
-  const copyOperations = USER_INSTALL_MANIFEST.copyOperations;
-
-  let totalCopied = 0;
-
-  for (const op of copyOperations) {
-    const srcPath = path.join(repoRoot, op.src);
-    const dstPath = path.join(copilotBase, op.dst);
-
-    if (!fs.existsSync(srcPath)) {
-      console.log(`  Skipping ${op.src} (not found)`);
-      continue;
-    }
-
-    if (op.single) {
-      fs.mkdirSync(path.dirname(dstPath), { recursive: true });
-      fs.copyFileSync(srcPath, dstPath);
-      console.log(`  Copied ${op.src} -> ${op.dst}`);
-      totalCopied++;
-    } else if (op.recursive) {
-      fs.mkdirSync(dstPath, { recursive: true });
-      copyRecursive(srcPath, dstPath, op.excludeRelativePaths || []);
-      const count = countFiles(dstPath);
-      console.log(`  Copied ${op.src} -> ${op.dst} (${count} items)`);
-      totalCopied += count;
-    } else if (op.pattern) {
-      fs.mkdirSync(dstPath, { recursive: true });
-      const files = fs.readdirSync(srcPath).filter(f => f.match(op.pattern.replace('*', '.*')));
-      for (const file of files) {
-        fs.copyFileSync(path.join(srcPath, file), path.join(dstPath, file));
-      }
-      console.log(`  Copied ${files.length} files from ${op.src} -> ${op.dst}`);
-      totalCopied += files.length;
-    }
-  }
+  const totalCopied = copyManifestOperations(repoRoot, copilotBase, USER_INSTALL_MANIFEST.copyOperations);
 
   // Rewrite hook paths
   const hooksDir = path.join(copilotBase, 'hooks');
@@ -485,6 +669,49 @@ function uninstall() {
   console.log('\n✅ Uninstallation complete!');
 }
 
+function uninstallCodex() {
+  console.log('Uninstalling Everything GitHub Copilot Codex assets (user-level)...\n');
+
+  const { codexBase, codexStateFile } = getPaths();
+
+  if (!fs.existsSync(codexBase)) {
+    console.log('  Nothing to uninstall ( ~/.codex/ not found )');
+    return;
+  }
+
+  const state = loadInstallState(codexStateFile);
+  if (!state) {
+    throw new Error('No Codex installer state file found. Refusing to uninstall because ~/.codex may contain unmanaged files.');
+  }
+
+  const managedPaths = Array.isArray(state.managedPaths) && state.managedPaths.length > 0
+    ? state.managedPaths
+    : USER_CODEX_INSTALL_MANIFEST.managedPaths;
+  const sortedManagedPaths = [...managedPaths].sort((left, right) => right.length - left.length);
+
+  for (const relativePath of sortedManagedPaths) {
+    resolveManagedPathInBase(codexBase, relativePath, 'codex');
+  }
+
+  console.log('  Removing managed ~/.codex contents...');
+  for (const relativePath of sortedManagedPaths) {
+    const absolutePath = resolveManagedPathInBase(codexBase, relativePath, 'codex');
+    if (!fs.existsSync(absolutePath)) {
+      continue;
+    }
+
+    fs.rmSync(absolutePath, { recursive: true, force: true });
+    pruneEmptyParents(path.dirname(absolutePath), codexBase);
+  }
+
+  removeInstallState(codexStateFile);
+  if (fs.existsSync(codexBase) && fs.readdirSync(codexBase).length === 0) {
+    fs.rmdirSync(codexBase);
+  }
+
+  console.log('\n✅ Codex user-level uninstallation complete!');
+}
+
 function reinstall() {
   console.log('Reinstalling Everything GitHub Copilot (user-level)...\n');
 
@@ -501,6 +728,22 @@ function reinstall() {
 
   console.log('  Running fresh install...\n');
   install();
+}
+
+function reinstallCodex() {
+  console.log('Reinstalling Everything GitHub Copilot Codex assets (user-level)...\n');
+
+  const { codexBase, codexStateFile } = getPaths();
+  const isInstalled = fs.existsSync(codexBase) && fs.existsSync(codexStateFile);
+
+  if (isInstalled) {
+    console.log('  Existing Codex installation detected. Running uninstall first...\n');
+    uninstallCodex();
+    console.log('');
+  }
+
+  console.log('  Running fresh Codex install...\n');
+  installCodex();
 }
 
 function copyRecursive(src, dst, excludeRelativePaths = [], currentRelativePath = '') {
@@ -537,29 +780,82 @@ function countFiles(dir) {
   return count;
 }
 
-// Main
-const command = process.argv[2] || 'install';
+function printUsage() {
+  console.log('Usage: everything-githubcopilot [install|uninstall|reinstall] [--provider copilot|codex|all]');
+  console.log('\nCommands:');
+  console.log('  install     Install user-level assets');
+  console.log('  uninstall   Remove user-level installation');
+  console.log('  reinstall   Uninstall then install fresh');
+  console.log('\nProviders:');
+  console.log('  copilot     Manage ~/.copilot/ and VS Code Copilot settings (default)');
+  console.log('  codex       Manage ~/.codex/everything-githubcopilot and Codex global templates');
+  console.log('  all         Run both provider installers');
+}
+
+function parseArgs(argv = process.argv) {
+  const args = argv.slice(2);
+  const command = args.shift() || 'install';
+  let provider = 'copilot';
+
+  while (args.length > 0) {
+    const arg = args.shift();
+    if (arg === '--provider' || arg === '-p') {
+      provider = args.shift();
+      if (!provider) {
+        throw new Error('--provider requires one of: copilot, codex, all');
+      }
+      continue;
+    }
+
+    if (arg.startsWith('--provider=')) {
+      provider = arg.slice('--provider='.length);
+      continue;
+    }
+
+    throw new Error(`Unknown option: ${arg}`);
+  }
+
+  if (!['install', 'uninstall', 'reinstall'].includes(command)) {
+    throw new Error(`Unknown command: ${command}`);
+  }
+
+  if (!['copilot', 'codex', 'all'].includes(provider)) {
+    throw new Error(`Unknown provider: ${provider}`);
+  }
+
+  return { command, provider };
+}
+
+function runCommand(command, provider) {
+  const providers = provider === 'all' ? ['copilot', 'codex'] : [provider];
+
+  for (const currentProvider of providers) {
+    if (currentProvider === 'copilot') {
+      if (command === 'install') {
+        install();
+      } else if (command === 'uninstall') {
+        uninstall();
+      } else {
+        reinstall();
+      }
+      continue;
+    }
+
+    if (command === 'install') {
+      installCodex();
+    } else if (command === 'uninstall') {
+      uninstallCodex();
+    } else {
+      reinstallCodex();
+    }
+  }
+}
 
 try {
-  switch (command) {
-    case 'install':
-      install();
-      break;
-    case 'uninstall':
-      uninstall();
-      break;
-    case 'reinstall':
-      reinstall();
-      break;
-    default:
-      console.log(`Usage: everything-githubcopilot [install|uninstall|reinstall]`);
-      console.log(`\nCommands:`);
-      console.log(`  install     Install user-level Copilot customizations to ~/.copilot/`);
-      console.log(`  uninstall   Remove user-level installation and restore VS Code settings`);
-      console.log(`  reinstall   Uninstall then install fresh`);
-      process.exit(1);
-  }
+  const { command, provider } = parseArgs();
+  runCommand(command, provider);
 } catch (error) {
   console.error(error.message);
+  printUsage();
   process.exit(1);
 }

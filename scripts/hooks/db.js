@@ -14,6 +14,7 @@ const path = require('path');
 const DB_DIR = path.join(process.cwd(), '.github', 'sessions');
 const DB_PATH = path.join(DB_DIR, 'copilot.db');
 const EMBEDDING_DIM = 384; // all-MiniLM-L6-v2
+const DEFAULT_EMBEDDING_MODEL = 'Xenova/all-MiniLM-L6-v2';
 const REQUIRED_DEPS = ['better-sqlite3', 'sqlite-vec'];
 const VALID_IMPORTANCE = new Set(['critical', 'high', 'medium', 'low']);
 const ACTIVE_TASK_STATUSES = ['pending', 'in-progress'];
@@ -213,7 +214,14 @@ function migrate(db) {
       project_id TEXT,
       label TEXT,
       importance TEXT NOT NULL DEFAULT 'medium',
-      confidence REAL NOT NULL DEFAULT 0.5
+      confidence REAL NOT NULL DEFAULT 0.5,
+      embedded_at TEXT,
+      embedding_model TEXT,
+      last_seen_at TEXT,
+      hit_count INTEGER NOT NULL DEFAULT 1,
+      domain TEXT,
+      trigger TEXT,
+      action TEXT
     );
 
     CREATE TABLE IF NOT EXISTS knowledge_vec_map (
@@ -259,6 +267,13 @@ function migrate(db) {
     'ALTER TABLE knowledge ADD COLUMN label TEXT',
     "ALTER TABLE knowledge ADD COLUMN importance TEXT NOT NULL DEFAULT 'medium'",
     'ALTER TABLE knowledge ADD COLUMN confidence REAL NOT NULL DEFAULT 0.5',
+    'ALTER TABLE knowledge ADD COLUMN embedded_at TEXT',
+    'ALTER TABLE knowledge ADD COLUMN embedding_model TEXT',
+    'ALTER TABLE knowledge ADD COLUMN last_seen_at TEXT',
+    'ALTER TABLE knowledge ADD COLUMN hit_count INTEGER NOT NULL DEFAULT 1',
+    'ALTER TABLE knowledge ADD COLUMN domain TEXT',
+    'ALTER TABLE knowledge ADD COLUMN trigger TEXT',
+    'ALTER TABLE knowledge ADD COLUMN action TEXT',
   ];
   for (const q of alterQueries) {
     try { db.exec(q); } catch { /* column already exists */ }
@@ -277,6 +292,12 @@ function migrate(db) {
 
     CREATE INDEX IF NOT EXISTS idx_knowledge_vec_map_rowid
       ON knowledge_vec_map(vec_rowid);
+
+    CREATE INDEX IF NOT EXISTS idx_knowledge_embedding_pending
+      ON knowledge(project_id, embedded_at, created_at);
+
+    CREATE INDEX IF NOT EXISTS idx_knowledge_seen
+      ON knowledge(project_id, confidence DESC, last_seen_at DESC, created_at DESC);
   `);
 
   // Create virtual vector table (gracefully skips if sqlite-vec not loaded)
@@ -717,36 +738,136 @@ function isVecAvailable() {
  * Insert a knowledge entry with its embedding vector.
  * Returns the inserted row id.
  */
-function insertKnowledge(db, { source, kind, content, createdAt, sessionId, embedding, projectId, label, importance, confidence }) {
+function insertKnowledge(db, {
+  source,
+  kind,
+  content,
+  createdAt,
+  sessionId,
+  embedding,
+  projectId,
+  label,
+  importance,
+  confidence,
+  embeddedAt,
+  embeddingModel,
+  lastSeenAt,
+  hitCount,
+  domain,
+  trigger,
+  action,
+}) {
   const normalizedImportance = VALID_IMPORTANCE.has(importance) ? importance : 'medium';
   const stmt = db.prepare(`
-    INSERT INTO knowledge (source, kind, content, created_at, session_id, project_id, label, importance, confidence)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+    INSERT INTO knowledge (
+      source, kind, content, created_at, session_id, project_id, label, importance, confidence,
+      embedded_at, embedding_model, last_seen_at, hit_count, domain, trigger, action
+    )
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `);
 
   const result = stmt.run(
     source, kind || 'pattern', content, createdAt, sessionId || null,
     projectId || null, label || null, normalizedImportance,
-    typeof confidence === 'number' ? confidence : 0.5
+    typeof confidence === 'number' ? confidence : 0.5,
+    embeddedAt || null,
+    embeddingModel || null,
+    lastSeenAt || null,
+    Number.isInteger(hitCount) && hitCount > 0 ? hitCount : 1,
+    domain || null,
+    trigger || null,
+    action || null
   );
   const rowId = result.lastInsertRowid;
 
   // Insert vector if embedding was provided (gracefully skips if sqlite-vec not loaded)
   if (embedding) {
-    try {
-      const vecStmt = db.prepare(
-        'INSERT INTO knowledge_vec (embedding) VALUES (?)'
-      );
-      const vecResult = vecStmt.run(vecToBlob(embedding));
-      db.prepare(
-        'INSERT OR REPLACE INTO knowledge_vec_map (knowledge_id, vec_rowid) VALUES (?, ?)'
-      ).run(Number(rowId), Number(vecResult.lastInsertRowid));
-    } catch {
-      // sqlite-vec not loaded or knowledge_vec table missing — skip vector storage
-    }
+    markKnowledgeEmbedded(db, {
+      knowledgeId: Number(rowId),
+      embedding,
+      embeddedAt: embeddedAt || new Date().toISOString(),
+      embeddingModel: embeddingModel || DEFAULT_EMBEDDING_MODEL,
+    });
   }
 
   return Number(rowId);
+}
+
+function getPendingKnowledgeEmbeddings(db, { projectId, limit = 25 } = {}) {
+  const params = [];
+  let scopeClause = '';
+
+  if (projectId) {
+    scopeClause = 'AND project_id = ?';
+    params.push(projectId);
+  }
+
+  const stmt = db.prepare(`
+    SELECT id, source, kind, content, created_at, session_id, project_id, label, importance, confidence,
+           embedded_at, embedding_model, last_seen_at, hit_count, domain, trigger, action
+    FROM knowledge
+    WHERE embedded_at IS NULL
+      ${scopeClause}
+      AND content IS NOT NULL
+      AND content != ''
+    ORDER BY created_at ASC
+    LIMIT ?
+  `);
+
+  return stmt.all(...params, limit);
+}
+
+function markKnowledgeEmbedded(db, { knowledgeId, embedding, embeddedAt, embeddingModel }) {
+  if (!knowledgeId || !embedding) {
+    return false;
+  }
+
+  try {
+    const existing = db.prepare('SELECT vec_rowid FROM knowledge_vec_map WHERE knowledge_id = ?').get(knowledgeId);
+    let vecRowId = existing ? Number(existing.vec_rowid) : null;
+
+    if (vecRowId) {
+      db.prepare('UPDATE knowledge_vec SET embedding = ? WHERE rowid = ?').run(vecToBlob(embedding), vecRowId);
+    } else {
+      const vecResult = db.prepare('INSERT INTO knowledge_vec (embedding) VALUES (?)').run(vecToBlob(embedding));
+      vecRowId = Number(vecResult.lastInsertRowid);
+      db.prepare(
+        'INSERT OR REPLACE INTO knowledge_vec_map (knowledge_id, vec_rowid) VALUES (?, ?)'
+      ).run(knowledgeId, vecRowId);
+    }
+
+    db.prepare(`
+      UPDATE knowledge
+      SET embedded_at = ?,
+          embedding_model = ?
+      WHERE id = ?
+    `).run(
+      embeddedAt || new Date().toISOString(),
+      embeddingModel || DEFAULT_EMBEDDING_MODEL,
+      knowledgeId
+    );
+
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function recordKnowledgeHit(db, { knowledgeId, seenAt, confidenceDelta = 0.05 } = {}) {
+  if (!knowledgeId) {
+    return false;
+  }
+
+  const normalizedDelta = typeof confidenceDelta === 'number' ? confidenceDelta : 0.05;
+  const result = db.prepare(`
+    UPDATE knowledge
+    SET last_seen_at = ?,
+        hit_count = COALESCE(hit_count, 1) + 1,
+        confidence = MIN(0.95, MAX(0, confidence + ?))
+    WHERE id = ?
+  `).run(seenAt || new Date().toISOString(), normalizedDelta, knowledgeId);
+
+  return result.changes > 0;
 }
 
 /**
@@ -757,7 +878,9 @@ function searchKnowledge(db, embedding, limit = 5, { projectId } = {}) {
   try {
     const scope = buildScopedKnowledgeFilter('kn', projectId);
     const stmt = db.prepare(`
-      SELECT kn.id, kn.source, kn.kind, kn.content, kn.created_at, v.distance
+      SELECT kn.id, kn.source, kn.kind, kn.content, kn.created_at, kn.session_id, kn.project_id,
+             kn.label, kn.importance, kn.confidence, kn.embedded_at, kn.embedding_model,
+             kn.last_seen_at, kn.hit_count, kn.domain, kn.trigger, kn.action, v.distance
       FROM knowledge_vec v
       INNER JOIN knowledge_vec_map m ON m.vec_rowid = v.rowid
       INNER JOIN knowledge kn ON kn.id = m.knowledge_id
@@ -780,7 +903,8 @@ function searchKnowledge(db, embedding, limit = 5, { projectId } = {}) {
 function searchKnowledgeByKeyword(db, keyword, limit = 10, { projectId } = {}) {
   const scope = buildScopedKnowledgeFilter('knowledge', projectId);
   const stmt = db.prepare(`
-    SELECT id, source, kind, content, created_at, session_id, project_id, label, importance, confidence
+    SELECT id, source, kind, content, created_at, session_id, project_id, label, importance, confidence,
+           embedded_at, embedding_model, last_seen_at, hit_count, domain, trigger, action
     FROM knowledge
     WHERE content LIKE ?
       AND ${scope.clause}
@@ -796,7 +920,8 @@ function searchKnowledgeByKeyword(db, keyword, limit = 10, { projectId } = {}) {
  */
 function getAllKnowledge(db, limit = 100) {
   const stmt = db.prepare(`
-    SELECT id, source, kind, content, created_at, session_id, project_id, label, importance, confidence
+    SELECT id, source, kind, content, created_at, session_id, project_id, label, importance, confidence,
+           embedded_at, embedding_model, last_seen_at, hit_count, domain, trigger, action
     FROM knowledge
     ORDER BY created_at DESC
     LIMIT ?
@@ -813,7 +938,8 @@ function getProjectKnowledge(db, { projectId, minConfidence = 0.4, limit = 10 } 
   if (projectId) {
     const scope = buildProjectScopedKnowledgeClause(projectId);
     const stmt = db.prepare(`
-      SELECT id, source, kind, content, created_at, session_id, project_id, label, importance, confidence
+      SELECT id, source, kind, content, created_at, session_id, project_id, label, importance, confidence,
+             embedded_at, embedding_model, last_seen_at, hit_count, domain, trigger, action
       FROM knowledge
       WHERE ${scope.clause}
       ORDER BY confidence DESC, created_at DESC
@@ -827,7 +953,8 @@ function getProjectKnowledge(db, { projectId, minConfidence = 0.4, limit = 10 } 
     const seenIds = new Set(rows.map((row) => row.id));
 
     const fallback = db.prepare(`
-      SELECT id, source, kind, content, created_at, session_id, project_id, label, importance, confidence
+      SELECT id, source, kind, content, created_at, session_id, project_id, label, importance, confidence,
+             embedded_at, embedding_model, last_seen_at, hit_count, domain, trigger, action
       FROM knowledge
       WHERE confidence >= ?
         AND NOT (kind = 'unresolved_issue' AND COALESCE(label, '') = 'err')
@@ -852,7 +979,8 @@ function getProjectKnowledge(db, { projectId, minConfidence = 0.4, limit = 10 } 
 
   // Fallback: cross-project, confidence-filtered
   const fallback = db.prepare(`
-    SELECT id, source, kind, content, created_at, session_id, project_id, label, importance, confidence
+    SELECT id, source, kind, content, created_at, session_id, project_id, label, importance, confidence,
+           embedded_at, embedding_model, last_seen_at, hit_count, domain, trigger, action
     FROM knowledge
     WHERE confidence >= ?
       AND NOT (kind = 'unresolved_issue' AND COALESCE(label, '') = 'err')
@@ -871,8 +999,11 @@ function searchKnowledgeByKeywords(db, keywords, { projectId, limit = 10 } = {})
     return [];
   }
 
-  // Build WHERE clause: (content LIKE ? OR content LIKE ? ...)
-  const likeClauses = keywords.map(() => 'content LIKE ?');
+  // Build WHERE clause across the fields that describe when and how to apply knowledge.
+  const searchableColumns = ['content', 'trigger', 'action', 'domain'];
+  const likeClauses = keywords.flatMap(() =>
+    searchableColumns.map((column) => `${column} LIKE ?`)
+  );
   const projectFilter = projectId
     ? `AND (
         project_id = ?
@@ -885,20 +1016,37 @@ function searchKnowledgeByKeywords(db, keywords, { projectId, limit = 10 } = {})
     : '';
 
   const sql = `
-    SELECT DISTINCT id, source, kind, content, created_at, session_id, project_id, label, importance, confidence
+    SELECT DISTINCT id, source, kind, content, created_at, session_id, project_id, label, importance, confidence,
+           embedded_at, embedding_model, last_seen_at, hit_count, domain, trigger, action
     FROM knowledge
     WHERE (${likeClauses.join(' OR ')}) ${projectFilter}
     ORDER BY confidence DESC, created_at DESC
     LIMIT ?
   `;
 
-  const params = keywords.map((kw) => `%${kw}%`);
+  const params = keywords.flatMap((kw) => searchableColumns.map(() => `%${kw}%`));
   if (projectId) {
     params.push(projectId);
   }
   params.push(limit);
 
   return db.prepare(sql).all(...params);
+}
+
+function getEmbeddedProjectKnowledge(db, { projectId, minConfidence = 0.4, limit = 10 } = {}) {
+  const scope = buildScopedKnowledgeFilter('knowledge', projectId);
+  const stmt = db.prepare(`
+    SELECT id, source, kind, content, created_at, session_id, project_id, label, importance, confidence,
+           embedded_at, embedding_model, last_seen_at, hit_count, domain, trigger, action
+    FROM knowledge
+    WHERE embedded_at IS NOT NULL
+      AND confidence >= ?
+      AND ${scope.clause}
+    ORDER BY confidence DESC, COALESCE(hit_count, 1) DESC, COALESCE(last_seen_at, created_at) DESC
+    LIMIT ?
+  `);
+
+  return stmt.all(minConfidence, ...scope.params, limit);
 }
 
 /**
@@ -1066,6 +1214,8 @@ module.exports = {
   countPendingTasks,
   countSessionPendingTasks,
   getAllKnowledge,
+  getEmbeddedProjectKnowledge,
+  getPendingKnowledgeEmbeddings,
   getProjectKnowledge,
   getRecentProjectSessions,
   getRecentSessions,
@@ -1079,15 +1229,18 @@ module.exports = {
   insertSessionFiles,
   isAvailable,
   isVecAvailable,
+  markKnowledgeEmbedded,
   normalizeTaskStatus,
   open,
   pruneOldObservations,
   searchKnowledge,
   searchKnowledgeByKeyword,
   searchKnowledgeByKeywords,
+  recordKnowledgeHit,
   upsertPendingTask,
   upsertSession,
   vecToBlob,
   DB_PATH,
   EMBEDDING_DIM,
+  DEFAULT_EMBEDDING_MODEL,
 };

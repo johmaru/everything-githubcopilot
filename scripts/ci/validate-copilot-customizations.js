@@ -915,6 +915,40 @@ function validateCodexContracts(errors) {
         errors.push('ERROR: P1-012: .codex/hooks.json Stop must delegate through a single codex-stop.js command so Codex receives valid JSON stdout');
       }
     }
+
+    if (hooksConfig && hooksConfig.hooks) {
+      const hasHookCommand = (eventName, matcher, scriptName) => {
+        const entries = Array.isArray(hooksConfig.hooks[eventName]) ? hooksConfig.hooks[eventName] : [];
+        return entries.some((entry) => {
+          const hooks = Array.isArray(entry.hooks) ? entry.hooks : [];
+          return entry && entry.matcher === matcher
+            && hooks.some((hook) => hook
+              && hook.type === 'command'
+              && typeof hook.command === 'string'
+              && hook.command.includes(`scripts/hooks/${scriptName}`));
+        });
+      };
+
+      if (!hasHookCommand('PreToolUse', 'apply_patch|Write|Edit', 'config-protection.js')) {
+        errors.push('ERROR: P1-012: .codex/hooks.json must protect Codex apply_patch edits with config-protection.js using matcher apply_patch|Write|Edit');
+      }
+
+      const requiredPostEditHooks = [
+        'quality-gate.js',
+        'post-edit-format.js',
+        'post-edit-typecheck.js',
+        'post-edit-console-warn.js',
+      ];
+      for (const scriptName of requiredPostEditHooks) {
+        if (!hasHookCommand('PostToolUse', 'apply_patch|Write|Edit', scriptName)) {
+          errors.push(`ERROR: P1-012: .codex/hooks.json must run ${scriptName} for Codex apply_patch edits using matcher apply_patch|Write|Edit`);
+        }
+      }
+
+      if (hooksConfig._codex_notes && Object.prototype.hasOwnProperty.call(hooksConfig._codex_notes, 'bash_only_limitation')) {
+        errors.push('ERROR: P1-012: .codex/hooks.json must not keep stale Bash-only Codex hook guidance after apply_patch hook support');
+      }
+    }
   }
 
   if (fs.existsSync(codexAgentsFile)) {
@@ -934,6 +968,12 @@ function validateCodexContracts(errors) {
     if (/skills\s+are\s+discovered\s+from\s+`?\.codex\/skills\/?`?/iu.test(content)
       || /codex\s+discovers\s+skills\s+from\s+`?\.codex\/skills\/?`?/iu.test(content)) {
       errors.push('ERROR: P1-012: .codex/AGENTS.md must keep .agents/skills as the canonical Codex discovery path; .codex/skills is compatibility-only');
+    }
+
+    if (/PreToolUse\/PostToolUse\s+only\s+intercept\s+Bash/iu.test(content)
+      || /Bash-only\s+for\s+Pre\/PostToolUse/iu.test(content)
+      || /before\s+Bash\s+commands\s+only/iu.test(content)) {
+      errors.push('ERROR: P1-012: .codex/AGENTS.md must document apply_patch edit hooks instead of stale Bash-only Codex hook guidance');
     }
 
     validateAnchoredContract(

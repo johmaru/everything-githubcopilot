@@ -3,7 +3,7 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 
-const codexFlow = require('../../scripts/installer/codex-flow');
+const codexFlow = require('../../scripts/codex/codex-flow');
 
 function test(name, fn) {
   try {
@@ -65,6 +65,7 @@ results.push(test('runFlow executes plan, implement, and review in order and wri
 
     const runMetadata = JSON.parse(fs.readFileSync(path.join(runRoot, 'run.json'), 'utf8'));
     const latestRunMetadata = JSON.parse(fs.readFileSync(latestRunFile, 'utf8'));
+    assert.strictEqual(runMetadata.workflow, 'default', 'default workflow should be recorded in run metadata');
     assert.strictEqual(
       runMetadata.runRoot,
       path.join('.github', 'sessions', 'codex-flow', 'run-001'),
@@ -110,6 +111,72 @@ results.push(test('runFlow executes plan, implement, and review in order and wri
       { name: 'review', profile: 'strict', status: 'completed' },
     ]);
   } finally {
+    cleanupTestDir(targetDir);
+  }
+}));
+
+results.push(test('runFlow supports workflow presets and records the selected phase route', () => {
+  const targetDir = createTestDir('egc-codex-flow-');
+  const calls = [];
+
+  try {
+    codexFlow.runFlow('Fix a regression', {
+      cwd: targetDir,
+      runId: 'run-bugfix',
+      workflow: 'bugfix',
+      execFileSync(command, args) {
+        calls.push({ command, args });
+        return `phase-output-${calls.length}`;
+      },
+    });
+
+    const runRoot = path.join(targetDir, '.github', 'sessions', 'codex-flow', 'run-bugfix');
+    const runMetadata = JSON.parse(fs.readFileSync(path.join(runRoot, 'run.json'), 'utf8'));
+
+    assert.deepStrictEqual(runMetadata.phases.map((phase) => phase.name), [
+      'inspect',
+      'implement',
+      'verify',
+      'repair',
+      'review',
+    ]);
+    assert.deepStrictEqual(calls.map((call) => call.args[call.args.length - 1]), [
+      path.join(runRoot, 'inspect', 'task.md'),
+      path.join(runRoot, 'implement', 'task.md'),
+      path.join(runRoot, 'verify', 'task.md'),
+      path.join(runRoot, 'repair', 'task.md'),
+      path.join(runRoot, 'review', 'task.md'),
+    ]);
+    assert.strictEqual(runMetadata.workflow, 'bugfix');
+  } finally {
+    cleanupTestDir(targetDir);
+  }
+}));
+
+results.push(test('main accepts --workflow before the task description', () => {
+  const targetDir = createTestDir('egc-codex-flow-');
+  const calls = [];
+  const originalConsoleLog = console.log;
+
+  try {
+    console.log = () => {};
+    const exitCode = codexFlow.main(['node', 'scripts/codex-flow.js', '--workflow', 'review', 'Review this change'], {
+      cwd: targetDir,
+      runId: 'run-review-workflow',
+      execFileSync(command, args) {
+        calls.push({ command, args });
+        return `review-workflow-output-${calls.length}`;
+      },
+    });
+
+    const runRoot = path.join(targetDir, '.github', 'sessions', 'codex-flow', 'run-review-workflow');
+    assert.strictEqual(exitCode, 0);
+    assert.deepStrictEqual(calls.map((call) => call.args[call.args.length - 1]), [
+      path.join(runRoot, 'inspect', 'task.md'),
+      path.join(runRoot, 'review', 'task.md'),
+    ]);
+  } finally {
+    console.log = originalConsoleLog;
     cleanupTestDir(targetDir);
   }
 }));

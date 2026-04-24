@@ -44,6 +44,50 @@ results.push(test('getFilePaths falls back to tool input file path environment v
   assert.deepStrictEqual(filePaths, ['src/from-env.ts']);
 }));
 
+results.push(test('getFilePaths extracts changed file paths from Codex apply_patch command payloads', () => {
+  const filePaths = shared.getFilePaths({
+    payload: {
+      tool_name: 'apply_patch',
+      tool_input: {
+        command: [
+          '*** Begin Patch',
+          '*** Add File: src/new.ts',
+          '+export const value = 1;',
+          '*** Update File: src/existing.ts',
+          '@@',
+          '-old',
+          '+new',
+          '*** Delete File: docs/old.md',
+          '*** End Patch',
+        ].join('\n'),
+      },
+    },
+  });
+
+  assert.deepStrictEqual(filePaths, ['src/new.ts', 'src/existing.ts', 'docs/old.md']);
+}));
+
+results.push(test('getFilePaths extracts source and destination paths from Codex apply_patch move payloads', () => {
+  const filePaths = shared.getFilePaths({
+    payload: {
+      tool_name: 'apply_patch',
+      tool_input: {
+        command: [
+          '*** Begin Patch',
+          '*** Update File: src/old-name.ts',
+          '*** Move to: src/new-name.ts',
+          '@@',
+          '-export const oldName = true;',
+          '+export const newName = true;',
+          '*** End Patch',
+        ].join('\n'),
+      },
+    },
+  });
+
+  assert.deepStrictEqual(filePaths, ['src/old-name.ts', 'src/new-name.ts']);
+}));
+
 if (originalEnv === undefined) {
   delete process.env.TOOL_INPUT_FILE_PATH;
 } else {

@@ -73,6 +73,62 @@ function appendMarkdownFallback() {
   return true;
 }
 
+function isLowSignalKnowledge(entry) {
+  const content = String(entry && entry.content ? entry.content : '');
+  const confidence = typeof entry.confidence === 'number' ? entry.confidence : 0.5;
+
+  if (!content.trim()) {
+    return true;
+  }
+
+  if (/Repeated workflow \(\d+x\):\s*Bash(?:\s*->\s*Bash)+/i.test(content)) {
+    return true;
+  }
+
+  if (entry.kind === 'hotspot' && confidence < 0.4) {
+    return true;
+  }
+
+  return confidence < 0.35;
+}
+
+function scoreKnowledge(entry, sourceRank) {
+  const confidence = typeof entry.confidence === 'number' ? entry.confidence : 0.5;
+  const hitCount = Number.isFinite(entry.hit_count) ? entry.hit_count : 1;
+  const seenAt = Date.parse(entry.last_seen_at || entry.created_at || '');
+  const recency = Number.isFinite(seenAt)
+    ? Math.max(0, 1 - ((Date.now() - seenAt) / (1000 * 60 * 60 * 24 * 90)))
+    : 0;
+
+  return confidence
+    + sourceRank
+    + Math.min(hitCount, 6) * 0.015
+    + recency * 0.05;
+}
+
+function mergeKnowledgeCandidates(groups, limit = 8) {
+  const byId = new Map();
+
+  for (const group of groups) {
+    for (const entry of group.entries || []) {
+      if (!entry || entry.id === undefined || isLowSignalKnowledge(entry)) {
+        continue;
+      }
+
+      const score = scoreKnowledge(entry, group.rank || 0);
+      const existing = byId.get(entry.id);
+      if (!existing || score > existing._score) {
+        byId.set(entry.id, { ...entry, _score: score });
+      }
+    }
+  }
+
+  return [...byId.values()]
+    .sort((left, right) => right._score - left._score)
+    .slice(0, limit)
+    .map(({ _score, ...entry }) => entry);
+}
+
 // Resolve session ID: payload > generate UUID, then persist for session-stop
 const sessionId = payload.session_id || payload.sessionId || crypto.randomUUID();
 try {
@@ -163,28 +219,45 @@ try {
       }
     } catch { /* non-fatal */ }
 
-    // 2. Keyword-matched knowledge (branch, filenames, project name)
+    // 2. Hybrid retrieval: cheap keyword hits, already-embedded project knowledge,
+    // and confidence-filtered fallback. Startup must not load the embedding model.
     const uniqueHints = [...new Set(searchHints)].slice(0, 8);
-    let knowledge = [];
+    const candidateGroups = [];
 
     if (uniqueHints.length > 0) {
-      knowledge = db.searchKnowledgeByKeywords(handle, uniqueHints, { projectId, limit: 8 });
+      candidateGroups.push({
+        rank: 0.12,
+        entries: db.searchKnowledgeByKeywords(handle, uniqueHints, { projectId, limit: 12 }),
+      });
     }
 
-    // 3. Fill remaining slots with project-scoped, confidence-filtered knowledge
-    if (knowledge.length < 8) {
-      const seenIds = new Set(knowledge.map((k) => k.id));
-      const projectKnowledge = db.getProjectKnowledge(handle, {
+    if (typeof db.getEmbeddedProjectKnowledge === 'function') {
+      candidateGroups.push({
+        rank: 0.1,
+        entries: db.getEmbeddedProjectKnowledge(handle, {
+          projectId,
+          minConfidence: 0.4,
+          limit: 12,
+        }),
+      });
+    }
+
+    candidateGroups.push({
+      rank: 0,
+      entries: db.getProjectKnowledge(handle, {
         projectId,
         minConfidence: 0.4,
-        limit: 8,
-      });
-      for (const k of projectKnowledge) {
-        if (knowledge.length >= 8) {
-          break;
-        }
+        limit: 12,
+      }),
+    });
 
-        if (!seenIds.has(k.id)) {
+    const knowledge = mergeKnowledgeCandidates(candidateGroups, 8);
+
+    if (knowledge.length < 8) {
+      const seenIds = new Set(knowledge.map((k) => k.id));
+      for (const k of db.getProjectKnowledge(handle, { projectId, minConfidence: 0.35, limit: 8 })) {
+        if (knowledge.length >= 8) break;
+        if (!seenIds.has(k.id) && !isLowSignalKnowledge(k)) {
           knowledge.push(k);
           seenIds.add(k.id);
         }

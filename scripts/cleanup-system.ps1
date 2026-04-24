@@ -1,6 +1,12 @@
 #!/usr/bin/env pwsh
 # cleanup-system.ps1 — PowerShell wrapper for the user-level installer CLI.
 
+[CmdletBinding()]
+param(
+    [ValidateSet('copilot', 'codex', 'all')]
+    [string]$Provider = 'copilot'
+)
+
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
@@ -16,8 +22,8 @@ if (-not (Test-Path $CliPath)) {
     throw "Installer CLI not found: $CliPath"
 }
 
-Write-Host 'Running user-level uninstaller'
-& $NodeCommand.Source $CliPath uninstall
+Write-Host "Running user-level uninstaller --provider $Provider"
+& $NodeCommand.Source $CliPath uninstall --provider $Provider
 
 if ($LASTEXITCODE -ne 0) {
     exit $LASTEXITCODE

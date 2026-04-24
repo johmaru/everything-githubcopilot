@@ -4,6 +4,7 @@ const packageJson = require('../../package.json');
 const {
   getProjectInstallManifest,
   getRuntimeDependencies,
+  getUserCodexInstallManifest,
   getUserCopilotSettings,
   getUserInstallManifest,
 } = require('../../scripts/installer/manifest');
@@ -65,7 +66,7 @@ results.push(test('project install manifest includes the current shipped project
   const manifest = getProjectInstallManifest();
   const sources = manifest.copyOperations.map(operation => operation.src).sort();
   const instructionsOperation = manifest.copyOperations.find(operation => operation.src === '.github/instructions');
-  const codexFlowOperation = manifest.copyOperations.find(operation => operation.src === 'scripts/installer/codex-flow.js');
+  const codexFlowOperation = manifest.copyOperations.find(operation => operation.src === 'scripts/codex/codex-flow.js');
 
   assert.deepStrictEqual(sources, [
     '.codex',
@@ -81,8 +82,8 @@ results.push(test('project install manifest includes the current shipped project
     'rust/semantic-indexer',
     'schemas',
     'scripts/ci',
+    'scripts/codex/codex-flow.js',
     'scripts/hooks',
-    'scripts/installer/codex-flow.js',
     'tests/fixtures',
   ]);
   assert.strictEqual(instructionsOperation.recursive, true);
@@ -98,6 +99,28 @@ results.push(test('user install manifest does not include .codex (Codex reads fr
 
   assert.ok(!sources.some(src => src.startsWith('.codex')), 'user install should not copy .codex');
   assert.ok(!managedPaths.some(p => p.startsWith('.codex')), 'user install should not manage .codex paths');
+}));
+
+results.push(test('user Codex install manifest maps assets into a namespaced ~/.codex payload', () => {
+  const manifest = getUserCodexInstallManifest();
+  const bySource = new Map(manifest.copyOperations.map(operation => [operation.src, operation]));
+
+  assert.deepStrictEqual(manifest.managedPaths, [
+    'everything-githubcopilot',
+    'skills/everything-githubcopilot',
+  ]);
+  assert.strictEqual(bySource.get('.codex/config.toml').dst, 'everything-githubcopilot/config.toml');
+  assert.strictEqual(bySource.get('.codex/hooks.json').dst, 'everything-githubcopilot/hooks.json');
+  assert.strictEqual(bySource.get('.codex/agents').dst, 'everything-githubcopilot/agents');
+  assert.strictEqual(bySource.get('.codex/rules').dst, 'everything-githubcopilot/rules');
+  assert.strictEqual(bySource.get('scripts/hooks').dst, 'everything-githubcopilot/scripts/hooks');
+  assert.strictEqual(bySource.get('scripts/codex/codex-flow.js').dst, 'everything-githubcopilot/scripts/codex-flow.js');
+  assert.strictEqual(bySource.get('.github/skills').dst, 'skills/everything-githubcopilot');
+  assert.deepStrictEqual(manifest.activeFiles.map(operation => operation.dst), [
+    'config.toml',
+    'hooks.json',
+    'rules/everything-githubcopilot-security.rules',
+  ]);
 }));
 
 results.push(test('runtime dependencies include all hook and validator dependencies', () => {

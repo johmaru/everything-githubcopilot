@@ -52,6 +52,30 @@ function getUserInstallManifest() {
   };
 }
 
+function getUserCodexInstallManifest() {
+  return {
+    managedPaths: [
+      'everything-githubcopilot',
+      'skills/everything-githubcopilot',
+    ],
+    activeFiles: [
+      { src: '.codex/config.toml', dst: 'config.toml', transform: 'codex-global-config' },
+      { src: '.codex/hooks.json', dst: 'hooks.json', transform: 'codex-global-hooks' },
+      { src: '.codex/rules/security.rules', dst: 'rules/everything-githubcopilot-security.rules' },
+    ],
+    copyOperations: [
+      { src: '.codex/AGENTS.md', dst: 'everything-githubcopilot/AGENTS.md', single: true },
+      { src: '.codex/config.toml', dst: 'everything-githubcopilot/config.toml', single: true },
+      { src: '.codex/hooks.json', dst: 'everything-githubcopilot/hooks.json', single: true },
+      { src: '.codex/agents', dst: 'everything-githubcopilot/agents', pattern: '*.toml' },
+      { src: '.codex/rules', dst: 'everything-githubcopilot/rules', pattern: '*.rules' },
+      { src: 'scripts/hooks', dst: 'everything-githubcopilot/scripts/hooks', pattern: '*.js' },
+      { src: 'scripts/codex/codex-flow.js', dst: 'everything-githubcopilot/scripts/codex-flow.js', single: true },
+      { src: '.github/skills', dst: 'skills/everything-githubcopilot', recursive: true },
+    ],
+  };
+}
+
 function getProjectInstallManifest() {
   return {
     managedPaths: [
@@ -68,7 +92,7 @@ function getProjectInstallManifest() {
       { src: '.github/skills', dst: '.github/skills', recursive: true },
       { src: 'scripts/hooks', dst: 'scripts/hooks', pattern: '*.js' },
       { src: 'scripts/ci', dst: 'scripts/ci', pattern: '*.js' },
-      { src: 'scripts/installer/codex-flow.js', dst: 'scripts/codex-flow.js', single: true },
+      { src: 'scripts/codex/codex-flow.js', dst: 'scripts/codex-flow.js', single: true },
       { src: 'schemas', dst: 'schemas', pattern: '*.json' },
       { src: '.vscode/settings.json', dst: '.vscode/settings.json', single: true, skipIfExists: true },
       { src: 'AGENTS.md', dst: 'AGENTS.md', single: true },
@@ -105,6 +129,7 @@ function getUserCopilotSettings() {
 module.exports = {
   getProjectInstallManifest,
   getRuntimeDependencies,
+  getUserCodexInstallManifest,
   getUserCopilotSettings,
   getUserInstallManifest,
 };

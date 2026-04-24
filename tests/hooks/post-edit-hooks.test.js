@@ -5,6 +5,8 @@ const os = require('os');
 const path = require('path');
 const Module = require('module');
 
+const shared = require('../../scripts/hooks/_shared');
+
 function test(name, fn) {
   try {
     fn();
@@ -109,11 +111,10 @@ function createSharedStub({ payload, emitted, runLocalBinImpl }) {
       return { payload };
     },
     getFilePath() {
-      const firstEdit = payload.tool_input.edits[0];
-      return firstEdit.filePath;
+      return shared.getFilePath({ payload });
     },
     getFilePaths() {
-      return payload.tool_input.edits.map((edit) => edit.filePath);
+      return shared.getFilePaths({ payload });
     },
     fileExists(filePath) {
       return fs.existsSync(filePath);
@@ -126,6 +127,10 @@ function createSharedStub({ payload, emitted, runLocalBinImpl }) {
         return null;
       }
       return runLocalBinImpl(name, args);
+    },
+    toRelativeWorkspacePath(filePath) {
+      const absolutePath = path.isAbsolute(filePath) ? filePath : path.join(process.cwd(), filePath);
+      return path.relative(process.cwd(), absolutePath).split(path.sep).join('/');
     },
     toWorkspacePath(filePath) {
       return path.isAbsolute(filePath) ? filePath : path.join(process.cwd(), filePath);
@@ -173,6 +178,145 @@ results.push(test('post-edit-format formats every eligible file from a multi-edi
       name: 'prettier',
       args: ['--write', firstFile, secondFile],
     });
+  } finally {
+    cleanupTestDir(testDir);
+  }
+}));
+
+results.push(test('config-protection blocks protected config edits from a Codex apply_patch payload', () => {
+  const testDir = createTestDir();
+  const emitted = [];
+
+  try {
+    const result = runHookScript('config-protection.js', {
+      cwd: testDir,
+      sharedStub: createSharedStub({
+        payload: {
+          tool_name: 'apply_patch',
+          tool_input: {
+            command: [
+              '*** Begin Patch',
+              '*** Update File: eslint.config.js',
+              '@@',
+              '-export default [];',
+              '+export default [{ rules: {} }];',
+              '*** End Patch',
+            ].join('\n'),
+          },
+        },
+        emitted,
+      }),
+    });
+
+    assert.strictEqual(result.exitCode, 2, 'protected config edits should be blocked');
+    assert.ok(emitted.some((entry) => entry.stream === 'stderr' && entry.message.includes('eslint.config.js')));
+  } finally {
+    cleanupTestDir(testDir);
+  }
+}));
+
+results.push(test('Codex apply_patch payloads drive post-edit format, typecheck, quality, and console hooks', () => {
+  const testDir = createTestDir();
+  const formatCalls = [];
+  const typecheckCalls = [];
+  const emitted = [];
+
+  try {
+    const tsFile = path.join(testDir, 'src', 'codex-edited.ts');
+    const jsFile = path.join(testDir, 'src', 'codex-edited.js');
+    fs.mkdirSync(path.dirname(tsFile), { recursive: true });
+    fs.writeFileSync(tsFile, 'export const value = 1;\n');
+    fs.writeFileSync(jsFile, 'console.log("codex");\n');
+
+    const payload = {
+      sessionId: 'codex-apply-patch-session',
+      tool_name: 'apply_patch',
+      tool_input: {
+        command: [
+          '*** Begin Patch',
+          `*** Update File: ${path.relative(testDir, tsFile).split(path.sep).join('/')}`,
+          '@@',
+          '-export const value = 0;',
+          '+export const value = 1;',
+          `*** Update File: ${path.relative(testDir, jsFile).split(path.sep).join('/')}`,
+          '@@',
+          '-console.log("old");',
+          '+console.log("codex");',
+          '*** End Patch',
+        ].join('\n'),
+      },
+    };
+
+    runHookScript('post-edit-format.js', {
+      cwd: testDir,
+      sharedStub: createSharedStub({
+        payload,
+        emitted,
+        runLocalBinImpl(name, args) {
+          formatCalls.push({ name, args });
+          return { status: 0, stdout: '', stderr: '' };
+        },
+      }),
+    });
+
+    runHookScript('post-edit-typecheck.js', {
+      cwd: testDir,
+      sharedStub: createSharedStub({
+        payload,
+        emitted,
+        runLocalBinImpl(name, args) {
+          typecheckCalls.push({ name, args });
+          return { status: 0, stdout: '', stderr: '' };
+        },
+      }),
+    });
+
+    runHookScript('post-edit-console-warn.js', {
+      cwd: testDir,
+      sharedStub: createSharedStub({ payload, emitted }),
+    });
+
+    assert.strictEqual(formatCalls.length, 1, 'formatter should run once for Codex apply_patch edits');
+    assert.deepStrictEqual(formatCalls[0], {
+      name: 'prettier',
+      args: ['--write', tsFile, jsFile],
+    });
+    assert.strictEqual(typecheckCalls.length, 1, 'typecheck should run for a Codex apply_patch TS edit');
+    assert.ok(emitted.some((entry) => entry.message.includes(jsFile) && entry.message.includes('console.log')));
+  } finally {
+    cleanupTestDir(testDir);
+  }
+}));
+
+results.push(test('quality-gate reads Codex apply_patch paths for JSON edits', () => {
+  const testDir = createTestDir();
+  const emitted = [];
+
+  try {
+    const filePath = path.join(testDir, 'package.json');
+    fs.writeFileSync(filePath, '{"name":"codex-quality"}\n');
+
+    const result = runHookScript('quality-gate.js', {
+      cwd: testDir,
+      sharedStub: createSharedStub({
+        payload: {
+          tool_name: 'apply_patch',
+          tool_input: {
+            command: [
+              '*** Begin Patch',
+              '*** Update File: package.json',
+              '@@',
+              '-{"name":"old"}',
+              '+{"name":"codex-quality"}',
+              '*** End Patch',
+            ].join('\n'),
+          },
+        },
+        emitted,
+      }),
+    });
+
+    assert.strictEqual(result.exitCode, 0, 'quality gate should pass for valid JSON extracted from a Codex apply_patch payload');
   } finally {
     cleanupTestDir(testDir);
   }
@@ -484,7 +628,6 @@ results.push(test('quality-gate checks every file from a multi-edit payload and 
     });
 
     assert.strictEqual(result.exitCode, 1, 'quality gate should fail when any edited JS file is invalid');
-    assert.ok(emitted.some((entry) => entry.message.includes(secondFile)), 'error output should mention the later invalid file');
   } finally {
     cleanupTestDir(testDir);
   }

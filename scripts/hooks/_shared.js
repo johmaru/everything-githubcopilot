@@ -117,6 +117,30 @@ function collectExplicitFilePaths(payload) {
   );
 }
 
+function extractApplyPatchFilePaths(patchText) {
+  if (typeof patchText !== 'string' || !patchText.trim()) {
+    return [];
+  }
+
+  const filePaths = [];
+  const headerPattern = /^\*\*\* (?:Add|Update|Delete) File:\s+(.+?)\s*$/u;
+  const movePattern = /^\*\*\* Move to:\s+(.+?)\s*$/u;
+
+  for (const line of patchText.split(/\r?\n/u)) {
+    const match = line.match(headerPattern) || line.match(movePattern);
+    if (!match) {
+      continue;
+    }
+
+    const filePath = match[1].trim();
+    if (filePath && filePath !== '/dev/null') {
+      filePaths.push(filePath);
+    }
+  }
+
+  return getUniqueStrings(filePaths);
+}
+
 function getContext() {
   const raw = readStdin();
   return {
@@ -142,6 +166,11 @@ function getFilePaths(context) {
   const payloadMatches = collectExplicitFilePaths(context.payload);
   if (payloadMatches.length > 0) {
     return payloadMatches;
+  }
+
+  const patchMatches = extractApplyPatchFilePaths(getCommandText(context));
+  if (patchMatches.length > 0) {
+    return patchMatches;
   }
 
   const envValue = findEnvValue(['toolInputFilePath', 'filePath', 'file_path', 'targetFile']);
@@ -212,6 +241,7 @@ function emit(message, stream = 'stdout') {
 
 module.exports = {
   emit,
+  extractApplyPatchFilePaths,
   fileExists,
   getCommandText,
   getContext,

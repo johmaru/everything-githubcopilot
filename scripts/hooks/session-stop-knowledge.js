@@ -26,10 +26,13 @@ function extractObservationPatterns(observations) {
 
       const errorSnippet = output.slice(0, 200).replace(/\n/g, ' ');
       const fixTool = next.tool_name;
-      const fixInput = (next.tool_input || '').slice(0, 200).replace(/\n/g, ' ');
+      const fixInput = summarizeToolInput(next.tool_input || '');
       patterns.push({
         kind: 'error_resolution',
         content: `Error in ${current.tool_name}: "${errorSnippet}" -> Fixed with ${fixTool}: "${fixInput}"`,
+        domain: 'debugging',
+        trigger: errorSnippet,
+        action: `Use ${fixTool}: ${fixInput}`,
         confidence: 0.4,
       });
       break;
@@ -52,6 +55,9 @@ function extractObservationPatterns(observations) {
   for (let length = 2; length <= 3; length += 1) {
     for (let index = 0; index <= observations.length - length; index += 1) {
       const sequence = observations.slice(index, index + length).map((observation) => observation.tool_name).join(' -> ');
+      if (isLowInformationSequence(sequence)) {
+        continue;
+      }
       sequenceCounts.set(sequence, (sequenceCounts.get(sequence) || 0) + 1);
     }
   }
@@ -61,6 +67,9 @@ function extractObservationPatterns(observations) {
       patterns.push({
         kind: 'workflow',
         content: `Repeated workflow (${count}x): ${sequence}`,
+        domain: 'workflow',
+        trigger: `when following the ${sequence.split(' -> ')[0]} workflow`,
+        action: `Use the observed sequence: ${sequence}`,
         confidence: Math.min(0.3 + count * 0.1, 0.8),
       });
     }
@@ -87,12 +96,41 @@ function extractObservationPatterns(observations) {
       patterns.push({
         kind: 'hotspot',
         content: `File hotspot: ${filePath} was edited ${count} times in this session`,
+        domain: 'codebase',
+        trigger: `when editing ${filePath}`,
+        action: 'Check nearby tests and existing patterns before changing this file again.',
         confidence: 0.3,
       });
     }
   }
 
   return patterns;
+}
+
+function summarizeToolInput(toolInput) {
+  const parsed = parseStructuredValue(toolInput);
+  if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+    const command = parsed.command || parsed.shellCommand || parsed.toolInputCommand;
+    if (typeof command === 'string' && command.trim()) {
+      return command.trim().slice(0, 200).replace(/\n/g, ' ');
+    }
+
+    const filePath = parsed.filePath || parsed.file_path || parsed.path || parsed.target;
+    if (typeof filePath === 'string' && filePath.trim()) {
+      return filePath.trim().slice(0, 200).replace(/\n/g, ' ');
+    }
+  }
+
+  return String(toolInput || '').slice(0, 200).replace(/\n/g, ' ');
+}
+
+function isLowInformationSequence(sequence) {
+  const tools = String(sequence || '').split(' -> ').map((tool) => tool.trim()).filter(Boolean);
+  if (tools.length === 0) {
+    return true;
+  }
+
+  return tools.every((tool) => /^bash$/i.test(tool));
 }
 
 function countFollowUpReads(observations) {
@@ -253,4 +291,5 @@ module.exports = {
   extractObservationPatterns,
   looksLikeError,
   looksLikeSuccess,
+  isLowInformationSequence,
 };

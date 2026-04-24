@@ -3,7 +3,7 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 const { execFileSync } = require('child_process');
-const { getUserInstallManifest } = require('../../scripts/installer/manifest');
+const { getUserCodexInstallManifest, getUserInstallManifest } = require('../../scripts/installer/manifest');
 
 function test(name, fn) {
   try {
@@ -27,7 +27,8 @@ function cleanupTestDir(testDir) {
 
 function runInstaller(command, env) {
   const cliPath = path.join(__dirname, '..', '..', 'scripts', 'installer', 'cli.js');
-  return execFileSync('node', [cliPath, command], {
+  const args = Array.isArray(command) ? command : [command];
+  return execFileSync('node', [cliPath, ...args], {
     encoding: 'utf8',
     stdio: ['pipe', 'pipe', 'pipe'],
     cwd: path.join(__dirname, '..', '..'),
@@ -42,8 +43,9 @@ function runInstaller(command, env) {
 
 function runInstallerFailure(command, env) {
   const cliPath = path.join(__dirname, '..', '..', 'scripts', 'installer', 'cli.js');
+  const args = Array.isArray(command) ? command : [command];
   try {
-    execFileSync('node', [cliPath, command], {
+    execFileSync('node', [cliPath, ...args], {
       encoding: 'utf8',
       stdio: ['pipe', 'pipe', 'pipe'],
       cwd: path.join(__dirname, '..', '..'),
@@ -433,6 +435,133 @@ results.push(test('install still fails when ide exists as a non-directory entry'
 
     assert.notStrictEqual(error.status, 0, 'install should fail when ide is not a directory');
     assert.ok((error.stderr || '').includes('Existing entries: ide'), 'failure should still report ide as unmanaged');
+  } finally {
+    cleanupTestDir(tempHome);
+    cleanupTestDir(tempVs);
+  }
+}));
+
+results.push(test('codex provider installs namespaced global assets and removes only managed paths', () => {
+  const tempHome = createTestDir('egc-installer-home-');
+
+  try {
+    const codexBase = path.join(tempHome, '.codex');
+
+    runInstaller(['install', '--provider', 'codex'], {
+      EGCOPILOT_CODEX_HOME: codexBase,
+    });
+
+    const state = readJson(path.join(codexBase, '.everything-githubcopilot-codex-install.json'));
+    const configText = fs.readFileSync(path.join(codexBase, 'config.toml'), 'utf8');
+    const hooksText = fs.readFileSync(path.join(codexBase, 'hooks.json'), 'utf8');
+
+    assert.ok(fs.existsSync(path.join(codexBase, 'everything-githubcopilot', 'config.toml')), 'Codex config template should be installed under the managed namespace');
+    assert.ok(fs.existsSync(path.join(codexBase, 'everything-githubcopilot', 'agents', 'planner.toml')), 'Codex agent configs should be installed under the managed namespace');
+    assert.ok(fs.existsSync(path.join(codexBase, 'everything-githubcopilot', 'scripts', 'hooks', 'config-protection.js')), 'Codex hook scripts should be installed under the managed namespace');
+    assert.ok(fs.existsSync(path.join(codexBase, 'everything-githubcopilot', 'scripts', 'codex-flow.js')), 'Codex flow launcher should be installed under the managed namespace');
+    assert.ok(fs.existsSync(path.join(codexBase, 'skills', 'everything-githubcopilot', 'agent-eval', 'SKILL.md')), 'Codex skills should be installed in a namespaced skills folder');
+    assert.ok(fs.existsSync(path.join(codexBase, 'rules', 'everything-githubcopilot-security.rules')), 'Codex global rule should be installed as an active rules file');
+    assert.ok(configText.includes('config_file = "everything-githubcopilot/agents/planner.toml"'), 'active global config should reference the namespaced agent payload');
+    assert.ok(hooksText.includes('everything-githubcopilot/scripts/hooks/config-protection.js'), 'active global hooks should reference the namespaced hook payload');
+    assert.deepStrictEqual(state.managedPaths, [
+      ...getUserCodexInstallManifest().managedPaths,
+      'config.toml',
+      'hooks.json',
+      'rules/everything-githubcopilot-security.rules',
+    ]);
+
+    runInstaller(['uninstall', '--provider=codex'], {
+      EGCOPILOT_CODEX_HOME: codexBase,
+    });
+
+    assert.ok(!fs.existsSync(path.join(codexBase, 'everything-githubcopilot')), 'uninstall should remove managed namespace payload');
+    assert.ok(!fs.existsSync(path.join(codexBase, 'skills', 'everything-githubcopilot')), 'uninstall should remove managed global skills');
+    assert.ok(!fs.existsSync(path.join(codexBase, 'config.toml')), 'uninstall should remove active config only when installer created it');
+  } finally {
+    cleanupTestDir(tempHome);
+  }
+}));
+
+results.push(test('codex provider preserves preexisting active config and hooks files', () => {
+  const tempHome = createTestDir('egc-installer-home-');
+
+  try {
+    const codexBase = path.join(tempHome, '.codex');
+    fs.mkdirSync(codexBase, { recursive: true });
+    fs.writeFileSync(path.join(codexBase, 'config.toml'), 'model = "custom"\n');
+    fs.writeFileSync(path.join(codexBase, 'hooks.json'), '{"hooks":{}}\n');
+
+    runInstaller(['install', '--provider', 'codex'], {
+      EGCOPILOT_CODEX_HOME: codexBase,
+    });
+
+    const state = readJson(path.join(codexBase, '.everything-githubcopilot-codex-install.json'));
+    assert.strictEqual(fs.readFileSync(path.join(codexBase, 'config.toml'), 'utf8'), 'model = "custom"\n');
+    assert.strictEqual(fs.readFileSync(path.join(codexBase, 'hooks.json'), 'utf8'), '{"hooks":{}}\n');
+    assert.ok(!state.managedPaths.includes('config.toml'), 'preexisting config should not be marked managed');
+    assert.ok(!state.managedPaths.includes('hooks.json'), 'preexisting hooks should not be marked managed');
+
+    runInstaller(['uninstall', '--provider', 'codex'], {
+      EGCOPILOT_CODEX_HOME: codexBase,
+    });
+
+    assert.strictEqual(fs.readFileSync(path.join(codexBase, 'config.toml'), 'utf8'), 'model = "custom"\n');
+    assert.strictEqual(fs.readFileSync(path.join(codexBase, 'hooks.json'), 'utf8'), '{"hooks":{}}\n');
+  } finally {
+    cleanupTestDir(tempHome);
+  }
+}));
+
+results.push(test('codex provider refuses unmanaged namespace collisions', () => {
+  const tempHome = createTestDir('egc-installer-home-');
+
+  try {
+    const codexBase = path.join(tempHome, '.codex');
+    fs.mkdirSync(path.join(codexBase, 'skills', 'everything-githubcopilot'), { recursive: true });
+    fs.writeFileSync(path.join(codexBase, 'skills', 'everything-githubcopilot', 'marker.txt'), 'keep\n');
+
+    const error = runInstallerFailure(['install', '--provider', 'codex'], {
+      EGCOPILOT_CODEX_HOME: codexBase,
+    });
+
+    assert.notStrictEqual(error.status, 0, 'install should fail for unmanaged Codex namespace collisions');
+    assert.ok((error.stderr || '').includes('Refusing to install Codex assets over unmanaged ~/.codex paths'), 'failure should explain the unmanaged collision');
+    assert.ok(fs.existsSync(path.join(codexBase, 'skills', 'everything-githubcopilot', 'marker.txt')), 'unmanaged Codex files must be preserved');
+  } finally {
+    cleanupTestDir(tempHome);
+  }
+}));
+
+results.push(test('all provider installs both Copilot and Codex user-level lanes', () => {
+  const tempHome = createTestDir('egc-installer-home-');
+  const tempVs = createTestDir('egc-installer-vscode-');
+
+  try {
+    const copilotBase = path.join(tempHome, '.copilot');
+    const codexBase = path.join(tempHome, '.codex');
+    const vsSettings = path.join(tempVs, 'settings.json');
+    fs.mkdirSync(path.dirname(vsSettings), { recursive: true });
+    fs.writeFileSync(vsSettings, '{}\n');
+
+    runInstaller(['install', '--provider', 'all'], {
+      EGCOPILOT_COPILOT_BASE: copilotBase,
+      EGCOPILOT_CODEX_HOME: codexBase,
+      EGCOPILOT_VSCODE_SETTINGS: vsSettings,
+    });
+
+    assert.ok(fs.existsSync(path.join(copilotBase, '.everything-githubcopilot-install.json')), 'Copilot state should be created');
+    assert.ok(fs.existsSync(path.join(codexBase, '.everything-githubcopilot-codex-install.json')), 'Codex state should be created');
+    assert.ok(fs.existsSync(path.join(copilotBase, 'hooks', 'deterministic-hooks.json')), 'Copilot hooks should be installed');
+    assert.ok(fs.existsSync(path.join(codexBase, 'everything-githubcopilot', 'hooks.json')), 'Codex hooks template should be installed');
+
+    runInstaller(['uninstall', '--provider', 'all'], {
+      EGCOPILOT_COPILOT_BASE: copilotBase,
+      EGCOPILOT_CODEX_HOME: codexBase,
+      EGCOPILOT_VSCODE_SETTINGS: vsSettings,
+    });
+
+    assert.ok(!fs.existsSync(copilotBase), 'all-provider uninstall should remove managed Copilot base when empty');
+    assert.ok(!fs.existsSync(codexBase), 'all-provider uninstall should remove managed Codex base when empty');
   } finally {
     cleanupTestDir(tempHome);
     cleanupTestDir(tempVs);

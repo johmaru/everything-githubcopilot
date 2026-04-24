@@ -60,12 +60,37 @@ function parseArgs(argv) {
         args.limit = parseInt(next, 10) || 5;
         i++;
         break;
+      case '--backfill':
+        args.backfill = true;
+        break;
       default:
         break;
     }
   }
 
   return args;
+}
+
+function fakeEmbedding() {
+  const vec = new Float32Array(db.EMBEDDING_DIM);
+  vec.fill(0.01);
+  return vec;
+}
+
+async function generateEmbedding(text) {
+  if (process.env.EGC_TEST_FAKE_EMBEDDING === '1') {
+    return fakeEmbedding();
+  }
+
+  return embedding.embed(text);
+}
+
+function getEmbeddingModelName() {
+  if (process.env.EGC_TEST_FAKE_EMBEDDING === '1') {
+    return 'test/fake-embedding';
+  }
+
+  return embedding.MODEL_ID || db.DEFAULT_EMBEDDING_MODEL;
 }
 
 function readStdin() {
@@ -110,7 +135,7 @@ async function runStore(args) {
     let embedded = false;
 
     try {
-      vec = await embedding.embed(sanitizedContent);
+      vec = await generateEmbedding(sanitizedContent);
       embedded = vec !== null;
     } catch {
       // Embedding failed — store without vector
@@ -126,9 +151,70 @@ async function runStore(args) {
       label: args.label || null,
       importance: args.importance,
       embedding: vec,
+      embeddedAt: embedded ? new Date().toISOString() : null,
+      embeddingModel: embedded ? getEmbeddingModelName() : null,
     });
 
     process.stdout.write(JSON.stringify({ id, embedded }) + '\n');
+  } finally {
+    db.close();
+  }
+}
+
+async function runBackfill(args) {
+  const limit = args.limit || 25;
+  const projectId = args.projectId || db.detectProjectId(process.cwd());
+  const handle = db.open();
+  if (!handle) {
+    process.stderr.write('Error: database is not available (better-sqlite3 not installed)\n');
+    process.exit(1);
+  }
+
+  const stats = {
+    processed: 0,
+    embedded: 0,
+    skipped: 0,
+    vecAvailable: false,
+  };
+
+  try {
+    stats.vecAvailable = db.isVecAvailable();
+    if (!stats.vecAvailable) {
+      process.stdout.write(JSON.stringify(stats) + '\n');
+      return;
+    }
+
+    const rows = db.getPendingKnowledgeEmbeddings(handle, { projectId, limit });
+    for (const row of rows) {
+      stats.processed += 1;
+      const sanitizedContent = sanitizeKnowledgeContent(row.content);
+      let vec = null;
+      try {
+        vec = await generateEmbedding(sanitizedContent);
+      } catch {
+        vec = null;
+      }
+
+      if (!vec) {
+        stats.skipped += 1;
+        continue;
+      }
+
+      const marked = db.markKnowledgeEmbedded(handle, {
+        knowledgeId: row.id,
+        embedding: vec,
+        embeddedAt: new Date().toISOString(),
+        embeddingModel: getEmbeddingModelName(),
+      });
+
+      if (marked) {
+        stats.embedded += 1;
+      } else {
+        stats.skipped += 1;
+      }
+    }
+
+    process.stdout.write(JSON.stringify(stats) + '\n');
   } finally {
     db.close();
   }
@@ -170,7 +256,9 @@ async function runSearch(args) {
 async function main() {
   const args = parseArgs(process.argv);
 
-  if (args.search) {
+  if (args.backfill) {
+    await runBackfill(args);
+  } else if (args.search) {
     await runSearch(args);
   } else {
     await runStore(args);

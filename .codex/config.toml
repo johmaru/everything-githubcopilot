@@ -1,6 +1,6 @@
 #:schema https://developers.openai.com/codex/config-schema.json
 
-# Everything Claude Code (ECC) — Codex Reference Configuration
+# Everything GitHub Copilot — Codex Reference Configuration
 #
 # Copy this file to ~/.codex/config.toml for global defaults, or keep it in
 # the project root as .codex/config.toml for project-local settings.
@@ -17,15 +17,16 @@
 # Top-level runtime settings (current Codex schema)
 approval_policy = "on-request"
 sandbox_mode = "workspace-write"
-web_search = "live"
+web_search = "cached"
 
 # External notifications receive a JSON payload on stdin.
-notify = [
-  "terminal-notifier",
-  "-title", "Codex ECC",
-  "-message", "Task completed!",
-  "-sound", "default",
-]
+# Keep project-local defaults cross-platform. macOS users can opt into:
+# notify = [
+#   "terminal-notifier",
+#   "-title", "Codex ECC",
+#   "-message", "Task completed!",
+#   "-sound", "default",
+# ]
 
 # Prefer the root AGENTS.md for project instructions.
 # model_instructions_file replaces built-in instructions and AGENTS.md,
@@ -33,30 +34,33 @@ notify = [
 # model_instructions_file = "/absolute/path/to/instructions.md"
 
 # MCP servers
-# Keep the default project set lean. API-backed servers inherit credentials from
-# the launching environment or can be supplied by a user-level ~/.codex/config.toml.
-[mcp_servers.github]
-command = "npx"
-args = ["-y", "@modelcontextprotocol/server-github"]
-
-[mcp_servers.context7]
-command = "npx"
-args = ["-y", "@upstash/context7-mcp@latest"]
-
-[mcp_servers.exa]
-url = "https://mcp.exa.ai/mcp"
-
-[mcp_servers.memory]
-command = "npx"
-args = ["-y", "@modelcontextprotocol/server-memory"]
-
-[mcp_servers.playwright]
-command = "npx"
-args = ["-y", "@playwright/mcp@latest", "--extension"]
-
-[mcp_servers.sequential-thinking]
-command = "npx"
-args = ["-y", "@modelcontextprotocol/server-sequential-thinking"]
+# The shipped project default is local-first: hooks, rules, agents, skills, and
+# sandbox policy work without network-backed MCP services. Enable heavier MCP
+# servers in ~/.codex/config.toml or by uncommenting the blocks below for a
+# specific project.
+#
+# [mcp_servers.github]
+# command = "npx"
+# args = ["-y", "@modelcontextprotocol/server-github"]
+#
+# [mcp_servers.context7]
+# command = "npx"
+# args = ["-y", "@upstash/context7-mcp@latest"]
+#
+# [mcp_servers.exa]
+# url = "https://mcp.exa.ai/mcp"
+#
+# [mcp_servers.memory]
+# command = "npx"
+# args = ["-y", "@modelcontextprotocol/server-memory"]
+#
+# [mcp_servers.playwright]
+# command = "npx"
+# args = ["-y", "@playwright/mcp@latest", "--extension"]
+#
+# [mcp_servers.sequential-thinking]
+# command = "npx"
+# args = ["-y", "@modelcontextprotocol/server-sequential-thinking"]
 
 # Additional MCP servers (uncomment as needed):
 # [mcp_servers.supabase]
@@ -78,10 +82,21 @@ args = ["-y", "@modelcontextprotocol/server-sequential-thinking"]
 [features]
 # Codex multi-agent support is experimental as of March 2026.
 multi_agent = true
-# Enable experimental hooks (PreToolUse/PostToolUse for Bash only, SessionStart, Stop).
+# Enable experimental hooks. Codex builds that include openai/codex PR #18391
+# emit PreToolUse/PostToolUse for apply_patch as well as Bash.
 codex_hooks = true
 
 # Profiles — switch with `codex -p <name>`
+[profiles.minimal]
+approval_policy = "on-request"
+sandbox_mode = "workspace-write"
+web_search = "cached"
+
+[profiles.full]
+approval_policy = "on-request"
+sandbox_mode = "workspace-write"
+web_search = "live"
+
 [profiles.strict]
 approval_policy = "on-request"
 sandbox_mode = "read-only"

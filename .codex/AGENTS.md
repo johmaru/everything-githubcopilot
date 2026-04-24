@@ -54,27 +54,28 @@ Codex supports experimental hooks via `features.codex_hooks = true` in config.to
 **Supported events:**
 
 - `SessionStart` — fires on startup or resume
-- `PreToolUse` — fires before Bash commands only (not Write/Edit/MCP)
-- `PostToolUse` — fires after Bash commands only
+- `PreToolUse` — fires before Bash and, in Codex builds with openai/codex PR #18391, `apply_patch`
+- `PostToolUse` — fires after Bash and `apply_patch` edits
 - `Stop` — fires when session ends
 
 **Active hooks in `.codex/hooks.json`:**
 
-- PreToolUse: block `--no-verify` on git commands, warn before `git push`
-- PostToolUse: record tool observations
+- PreToolUse: block protected config edits through `apply_patch|Write|Edit`, block `--no-verify` on git commands, warn before `git push`
+- PostToolUse: run quality gate, formatter, targeted typecheck, console.log warning, and tool observation hooks
 - SessionStart: inject prior session summary
 - Stop: run a single `codex-stop.js` wrapper that persists the session summary and cleans up backups and typecheck state
 
-**Limitations:**
+**Edit hook contract:**
 
-- PreToolUse/PostToolUse only intercept Bash tool calls
-- Write/Edit/MultiEdit enforcement uses `.codex/rules/security.rules` instead
+- Codex hook stdin keeps the canonical `tool_name` as `apply_patch`
+- `Write` and `Edit` are matcher aliases for `apply_patch`
+- `MultiEdit` is not a Codex alias and is intentionally unsupported in `.codex/hooks.json`
+- Bash commands still use the `Bash` hook name; file-level policy for shell-written files is best-effort
 - Native Windows is supported; hook commands walk up to the nearest project root that contains `AGENTS.md` and `.codex/hooks.json` before loading the target script
 
 ## Execution Policy (Rules)
 
-Security and config protection that cannot run via hooks (Write/Edit interception)
-is enforced via `.codex/rules/security.rules` in Starlark format:
+Security and destructive-command protection is also enforced via `.codex/rules/security.rules` in Starlark format:
 
 - Linter/formatter config files are forbidden from edits
 - `git push --force`, `git reset --hard`, `rm -rf` require confirmation
@@ -84,9 +85,9 @@ Test rules with: `codex execpolicy check "edit eslint.config.js"`
 
 ## MCP Servers
 
-Treat the project-local `.codex/config.toml` as the default Codex baseline for ECC.
-The current baseline enables GitHub, Context7, Exa, Memory, Playwright, and Sequential Thinking.
-Add heavier extras in `~/.codex/config.toml` only when a task actually needs them.
+Treat the project-local `.codex/config.toml` as the default Codex baseline for this compatibility lane.
+The shipped baseline is local-first: hooks, rules, agents, skills bridge, sandbox policy, and approval policy work without network-backed MCP services.
+Enable GitHub, Context7, Exa, Memory, Playwright, Sequential Thinking, or other heavier servers in `~/.codex/config.toml` or by uncommenting the project-local examples only when a task actually needs them.
 
 ## Multi-Agent Support
 
@@ -145,20 +146,20 @@ supporter → researcher (deep investigation)
 
 | Feature      | VS Code Copilot           | Codex CLI                                       |
 | ------------ | ------------------------- | ----------------------------------------------- |
-| Hooks        | 8+ event types, all tools | 4 events, Bash-only for Pre/PostToolUse         |
+| Hooks        | 8+ event types, all tools | Session/Stop plus Bash and apply_patch Pre/Post |
 | Context file | copilot-instructions.md   | AGENTS.md                                       |
 | Skills       | Plugin-based discovery    | `.agents/skills/` auto-discovery                |
 | Instructions | `.github/instructions/`   | Root `AGENTS.md` + `.codex/rules/`              |
 | Prompts      | `.github/prompts/*.md`    | No dedicated runtime prompt directory           |
 | Rules        | Hook-based                | `.codex/rules/*.rules` (Starlark)               |
 | Agents       | `.github/agents/*.md`     | `.codex/agents/*.toml` + `[agents.*]` in config |
-| Security     | Hook-based enforcement    | Rules + hooks (Bash) + instructions             |
-| MCP          | Full support              | Full support via `config.toml`                  |
+| Security     | Hook-based enforcement    | Rules + apply_patch/Bash hooks + instructions   |
+| MCP          | Full support              | Local-first baseline, optional MCP expansion    |
 
 ## Security Enforcement
 
 1. **Rules**: `.codex/rules/security.rules` blocks forbidden file edits and destructive commands
-2. **Hooks**: PreToolUse blocks `--no-verify` and warns before `git push`
+2. **Hooks**: PreToolUse/PostToolUse protect `apply_patch` edits, block `--no-verify`, and warn before `git push`
 3. **Instructions**: AGENTS.md enforces input validation, secret management, and review workflows
 4. **Sandbox**: Agent-level `sandbox_mode` restricts file access (read-only, workspace-write)
 5. Always validate inputs at system boundaries

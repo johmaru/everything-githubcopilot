@@ -14,6 +14,9 @@ const repoRoot = path.join(__dirname, '..', '..');
 const validatorsDir = path.join(repoRoot, 'scripts', 'ci');
 const SHIPPED_CODEX_SESSION_START_COMMAND = `node -e "var fs=require('fs'),path=require('path');var dir=process.cwd();var rel='scripts/hooks/session-start.js';for(;;){var candidate=path.join(dir,rel);var hasMarkers=fs.existsSync(path.join(dir,'AGENTS.md'))&&fs.existsSync(path.join(dir,'.codex','hooks.json'));if(hasMarkers){if(fs.existsSync(candidate)){process.chdir(dir);require(candidate)}else{process.exit(0)}break;}var parent=path.dirname(dir);if(parent===dir){process.exit(0)}dir=parent}"`;
 const SHIPPED_CODEX_STOP_COMMAND = `node -e "var fs=require('fs'),path=require('path');var dir=process.cwd();var rel='scripts/hooks/codex-stop.js';for(;;){var candidate=path.join(dir,rel);var hasMarkers=fs.existsSync(path.join(dir,'AGENTS.md'))&&fs.existsSync(path.join(dir,'.codex','hooks.json'));if(hasMarkers){if(fs.existsSync(candidate)){process.chdir(dir);var mod=require(candidate);if(mod&&typeof mod.main==='function'){mod.main()}}else{process.exit(0)}break;}var parent=path.dirname(dir);if(parent===dir){process.exit(0)}dir=parent}"`;
+function shippedCodexHookCommand(scriptName) {
+  return `node -e "var fs=require('fs'),path=require('path');var dir=process.cwd();var rel='scripts/hooks/${scriptName}';for(;;){var candidate=path.join(dir,rel);var hasMarkers=fs.existsSync(path.join(dir,'AGENTS.md'))&&fs.existsSync(path.join(dir,'.codex','hooks.json'));if(hasMarkers){if(fs.existsSync(candidate)){process.chdir(dir);require(candidate)}else{process.exit(0)}break;}var parent=path.dirname(dir);if(parent===dir){process.exit(0)}dir=parent}"`;
+}
 let packedFilePathsCache = null;
 
 function test(name, fn) {
@@ -225,6 +228,56 @@ function writeCodexCompatibilitySurface(testDir, options = {}) {
                 type: 'command',
                 command: SHIPPED_CODEX_SESSION_START_COMMAND,
                 timeout: 60,
+              },
+            ],
+          },
+        ],
+        PreToolUse: [
+          {
+            matcher: 'apply_patch|Write|Edit',
+            hooks: [
+              {
+                type: 'command',
+                command: shippedCodexHookCommand('config-protection.js'),
+                timeout: 5,
+              },
+            ],
+          },
+        ],
+        PostToolUse: [
+          {
+            matcher: 'apply_patch|Write|Edit',
+            hooks: [
+              {
+                type: 'command',
+                command: shippedCodexHookCommand('quality-gate.js'),
+              },
+            ],
+          },
+          {
+            matcher: 'apply_patch|Write|Edit',
+            hooks: [
+              {
+                type: 'command',
+                command: shippedCodexHookCommand('post-edit-format.js'),
+              },
+            ],
+          },
+          {
+            matcher: 'apply_patch|Write|Edit',
+            hooks: [
+              {
+                type: 'command',
+                command: shippedCodexHookCommand('post-edit-typecheck.js'),
+              },
+            ],
+          },
+          {
+            matcher: 'apply_patch|Write|Edit',
+            hooks: [
+              {
+                type: 'command',
+                command: shippedCodexHookCommand('post-edit-console-warn.js'),
               },
             ],
           },
@@ -1929,6 +1982,7 @@ results.push(test('package manifest keeps the shipped Codex runtime surface in t
   assert.strictEqual(isPublishedRepoFile('.codex/hooks.json'), true, '.codex/hooks.json should stay in the published package surface');
   assert.strictEqual(isPublishedRepoFile('.codex/rules/security.rules'), true, '.codex/rules/security.rules should stay in the published package surface');
   assert.strictEqual(isPublishedRepoFile('.codex/agents/explorer.toml'), true, '.codex/agents/explorer.toml should stay in the published package surface');
+  assert.strictEqual(isPublishedRepoFile('scripts/codex/codex-flow.js'), true, 'scripts/codex/codex-flow.js should stay in the published package surface');
 }));
 
 results.push(test('package manifest keeps every shipped Codex agent registration in the published files surface', () => {
@@ -2784,6 +2838,76 @@ results.push(test('validate-copilot-customizations rejects .codex/AGENTS.md guid
     assert.strictEqual(result.code, 1, 'should fail when .codex/AGENTS.md rewrites the canonical skills discovery path');
     assert.ok(result.stderr.includes('P1-012'), 'should report the Codex contract rule id');
     assert.ok(result.stderr.includes('.codex/skills'), 'should identify the incorrect discovery-path claim');
+  } finally {
+    cleanupTestDir(testDir);
+  }
+}));
+
+results.push(test('validate-copilot-customizations rejects Codex hooks that omit apply_patch edit protection', () => {
+  const testDir = createTestDir();
+  try {
+    writeMinimalRepoFixtures(testDir);
+    writeCodexCompatibilitySurface(testDir, {
+      createSkillsBridge: true,
+      hooksJson: JSON.stringify({
+        hooks: {
+          SessionStart: [
+            {
+              matcher: 'startup|resume',
+              hooks: [
+                {
+                  type: 'command',
+                  command: SHIPPED_CODEX_SESSION_START_COMMAND,
+                  timeout: 60,
+                },
+              ],
+            },
+          ],
+          Stop: [
+            {
+              hooks: [
+                {
+                  type: 'command',
+                  command: SHIPPED_CODEX_STOP_COMMAND,
+                  timeout: 30,
+                },
+              ],
+            },
+          ],
+        },
+      }, null, 2),
+    });
+
+    const result = runValidatorWithOverrides('validate-copilot-customizations', {
+      ROOT: testDir,
+    });
+
+    assert.strictEqual(result.code, 1, 'should fail when Codex edit hooks are missing');
+    assert.ok(result.stderr.includes('P1-012'), 'should report the Codex contract rule id');
+    assert.ok(result.stderr.includes('apply_patch|Write|Edit'), 'should identify the required edit hook matcher');
+  } finally {
+    cleanupTestDir(testDir);
+  }
+}));
+
+results.push(test('validate-copilot-customizations rejects stale Bash-only Codex hook guidance', () => {
+  const testDir = createTestDir();
+  try {
+    writeMinimalRepoFixtures(testDir);
+    writeCodexCompatibilitySurface(testDir, {
+      createSkillsBridge: true,
+      agentsDocExtraLines: [
+        'PreToolUse/PostToolUse only intercept Bash tool calls.',
+      ],
+    });
+
+    const result = runValidatorWithOverrides('validate-copilot-customizations', {
+      ROOT: testDir,
+    });
+
+    assert.strictEqual(result.code, 1, 'should fail on stale Bash-only Codex hook docs');
+    assert.ok(result.stderr.includes('P1-012'), 'should report the Codex contract rule id');
+    assert.ok(result.stderr.includes('Bash-only'), 'should explain the stale guidance problem');
   } finally {
     cleanupTestDir(testDir);
   }

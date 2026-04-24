@@ -313,7 +313,9 @@ function matchesExpected(entry, expected = {}) {
 
 function evaluateQueries(cases, entries, topK = 5) {
   const evaluatedCases = (cases || []).map((testCase) => {
-    const ranked = Array.isArray(testCase.queryEmbedding)
+    const canUseEmbeddings = Array.isArray(testCase.queryEmbedding)
+      && entries.some((entry) => Array.isArray(entry.embedding));
+    const ranked = canUseEmbeddings
       ? rankEntryPoints(testCase.queryEmbedding, entries, topK)
       : rankEntryPointsByKeyword(testCase.query, entries, topK);
     const hit = ranked.some((entry) => matchesExpected(entry, testCase.expected));

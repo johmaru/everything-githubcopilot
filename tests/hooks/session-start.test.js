@@ -362,7 +362,7 @@ results.push(
                     },
                     getProjectKnowledge(_handle, options) {
                         assert.strictEqual(options.projectId, 'proj-knowledge');
-                        assert.strictEqual(options.limit, 8, 'session-start should over-fetch to avoid duplicate underfill');
+                        assert.strictEqual(options.limit, 12, 'session-start should over-fetch to avoid duplicate underfill');
                         return [
                             { id: 1, kind: 'pattern', content: 'Keyword knowledge 1', source: 'project', confidence: 0.95 },
                             { id: 8, kind: 'workflow', content: 'Unique fallback knowledge', source: 'project', confidence: 0.7 },
@@ -379,6 +379,104 @@ results.push(
             const additionalContext = output.hookSpecificOutput.additionalContext;
             assert.ok(additionalContext.includes('## Accumulated Knowledge'));
             assert.ok(additionalContext.includes('Unique fallback knowledge'));
+        } finally {
+            cleanupTestDir(testDir);
+        }
+    })
+);
+
+results.push(
+    test('ranks hybrid knowledge candidates and suppresses low-confidence generic entries', () => {
+        const testDir = createTestDir();
+
+        try {
+            const result = runSessionStart({
+                cwd: testDir,
+                payload: { sessionId: 'sess-hybrid-knowledge' },
+                dbStub: {
+                    open() {
+                        return {
+                            prepare() {
+                                return {
+                                    all() {
+                                        return [];
+                                    },
+                                };
+                            },
+                        };
+                    },
+                    detectProjectId() {
+                        return 'proj-hybrid';
+                    },
+                    upsertSession() { },
+                    getRecentProjectSessions() {
+                        return [];
+                    },
+                    getPendingTasks() {
+                        return [];
+                    },
+                    searchKnowledgeByKeywords() {
+                        return [
+                            {
+                                id: 1,
+                                kind: 'workflow',
+                                content: 'Repeated workflow (77x): Bash -> Bash',
+                                source: 'auto-observation',
+                                confidence: 0.8,
+                                project_id: 'proj-hybrid',
+                                created_at: '2026-04-01T10:00:00Z',
+                            },
+                            {
+                                id: 2,
+                                kind: 'error_resolution',
+                                content: 'Fix sqlite-vec load failures by preserving keyword fallback',
+                                source: 'auto-observation',
+                                confidence: 0.5,
+                                project_id: 'proj-hybrid',
+                                created_at: '2026-04-01T10:01:00Z',
+                            },
+                        ];
+                    },
+                    getEmbeddedProjectKnowledge() {
+                        return [
+                            {
+                                id: 3,
+                                kind: 'pattern',
+                                content: 'SessionStart must not load the embedding model during startup',
+                                source: 'manual',
+                                confidence: 0.7,
+                                project_id: 'proj-hybrid',
+                                embedded_at: '2026-04-01T10:02:00Z',
+                                hit_count: 4,
+                                last_seen_at: '2026-04-01T10:03:00Z',
+                            },
+                        ];
+                    },
+                    getProjectKnowledge() {
+                        return [
+                            {
+                                id: 4,
+                                kind: 'hotspot',
+                                content: 'README.md edited 3 times',
+                                source: 'auto-observation',
+                                confidence: 0.2,
+                                project_id: 'proj-hybrid',
+                            },
+                        ];
+                    },
+                    close() { },
+                },
+            });
+
+            assert.strictEqual(result.exitCode, 0);
+            assert.strictEqual(result.emitted.length, 1);
+
+            const output = JSON.parse(result.emitted[0]);
+            const additionalContext = output.hookSpecificOutput.additionalContext;
+            assert.ok(additionalContext.includes('SessionStart must not load the embedding model'));
+            assert.ok(additionalContext.includes('Fix sqlite-vec load failures'));
+            assert.ok(!additionalContext.includes('Bash -> Bash'));
+            assert.ok(!additionalContext.includes('README.md edited 3 times'));
         } finally {
             cleanupTestDir(testDir);
         }

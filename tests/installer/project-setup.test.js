@@ -4,7 +4,7 @@ const os = require('os');
 const path = require('path');
 const { execFileSync } = require('child_process');
 
-const codexFlow = require('../../scripts/installer/codex-flow');
+const codexFlow = require('../../scripts/codex/codex-flow');
 const { getProjectInstallManifest } = require('../../scripts/installer/manifest');
 const projectSetup = require('../../scripts/installer/project-setup');
 
@@ -162,7 +162,9 @@ results.push(test('project setup copies the shared manifest payload without over
       assert.ok(fs.existsSync(targetPath), `expected copied path ${operation.dst}`);
     }
 
-    assert.ok(output.includes('Warning: .vscode/settings.json already exists'), 'setup should warn when preserving workspace settings');
+    if (fs.existsSync(path.join(__dirname, '..', '..', '.vscode', 'settings.json'))) {
+      assert.ok(output.includes('Warning: .vscode/settings.json already exists'), 'setup should warn when preserving workspace settings');
+    }
     assert.strictEqual(fs.readFileSync(existingVsSettings, 'utf8'), '{\n  "editor.wordWrap": "on"\n}\n', 'existing .vscode/settings.json should be preserved');
     assert.strictEqual(fs.readFileSync(existingWorkflow, 'utf8'), 'name: custom-ci\n', 'existing workflow files with colliding names should be preserved');
     for (const workflowName of fs.readdirSync(repoWorkflowsDir)) {

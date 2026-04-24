@@ -3,8 +3,11 @@
 
 [CmdletBinding()]
 param(
-    [ValidateSet('install', 'reinstall')]
-    [string]$Action = 'install'
+    [ValidateSet('install', 'uninstall', 'reinstall')]
+    [string]$Action = 'install',
+
+    [ValidateSet('copilot', 'codex', 'all')]
+    [string]$Provider = 'copilot'
 )
 
 Set-StrictMode -Version Latest
@@ -22,8 +25,8 @@ if (-not (Test-Path $CliPath)) {
     throw "Installer CLI not found: $CliPath"
 }
 
-Write-Host "Running user-level installer: $Action"
-& $NodeCommand.Source $CliPath $Action
+Write-Host "Running user-level installer: $Action --provider $Provider"
+& $NodeCommand.Source $CliPath $Action --provider $Provider
 
 if ($LASTEXITCODE -ne 0) {
     exit $LASTEXITCODE

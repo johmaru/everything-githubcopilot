@@ -99,11 +99,11 @@ An explicit target path is required, and it must be outside the source checkout.
 
 This copies the shared project payload into the target project: `.github/` assets, `.github/workflows/`, `.vscode/settings.json` when absent, `AGENTS.md`, `.codex/` (Codex CLI compatibility surface), `schemas/`, `scripts/codex-flow.js`, `scripts/ci/`, `scripts/hooks/`, `tests/fixtures/`, and `rust/semantic-indexer/`. It preserves an existing `.vscode/settings.json` with a warning instead of overwriting it.
 
-For Codex CLI, project setup also installs the project-local `.codex/` runtime assets, creates `.agents/skills/` as the canonical bridge from `.github/skills/` into Codex skill discovery, and creates `.codex/skills/` as a compatibility alias for tools that still read that path directly. Codex continues to read the root `AGENTS.md` for project instructions, while `.codex/AGENTS.md` remains compatibility notes for the shipped Codex surface.
+For Codex CLI, project setup also installs the project-local `.codex/` runtime assets, creates `.agents/skills/` as the canonical bridge from `.github/skills/` into Codex skill discovery, and creates `.codex/skills/` as a compatibility alias for tools that still read that path directly. Codex continues to read the root `AGENTS.md` for project instructions, while `.codex/AGENTS.md` remains compatibility notes for the shipped first-class Codex compatibility lane.
 
-After project setup, the supported Codex-only front door is `node scripts/codex-flow.js "<task>"` from the target project. The launcher acts as the external `plan -> implement -> review` orchestrator and writes phase artifacts under `.github/sessions/codex-flow/`.
+After project setup, the supported Codex-only front door is `node scripts/codex-flow.js "<task>"` from the target project. The launcher acts as the external `plan -> implement -> review` orchestrator and writes phase artifacts under `.github/sessions/codex-flow/`. Codex builds with `apply_patch` hook support also run the shipped edit hooks for `apply_patch|Write|Edit`, giving Codex the same edit-time quality gates as the Copilot lane where the runtime supports them.
 
-For lower-overhead follow-up work, the same launcher also supports `node scripts/codex-flow.js --resume-latest` to continue the first incomplete phase of the latest run and `node scripts/codex-flow.js --review-latest` to rerun only the review phase. It writes lightweight handoff files under the same artifact root and uses `.github/sessions/checkpoint.md` only as a transient bridge while a phase is actively running instead of shipping an always-on watcher.
+For lower-overhead follow-up work, the same launcher also supports `node scripts/codex-flow.js --workflow default "<task>"`, `--workflow bugfix`, `--workflow refactor`, `--workflow review`, `--resume-latest` to continue the first incomplete phase of the latest run, and `--review-latest` to rerun only the review phase. It writes lightweight handoff files under the same artifact root and uses `.github/sessions/checkpoint.md` only as a transient bridge while a phase is actively running instead of shipping an always-on watcher.
 
 Runtime dependencies now install from the target project's package manager when setup can detect one (`packageManager`, `pnpm-lock.yaml`, `yarn.lock`, `package-lock.json`, or `bun.lockb` / `bun.lock`), and fall back to `npm` otherwise. The bundled runtime set is `@huggingface/transformers`, `ajv`, `better-sqlite3`, and `sqlite-vec`.
 
@@ -111,9 +111,9 @@ Runtime dependencies now install from the target project's package manager when 
 
 ## Install User-Level
 
-Install instructions, agents, skills, prompts, hooks, and schemas into `~/.copilot/` for the current user, ship the Rust semantic indexer payload for local AST exploration, and update VS Code user settings so every workspace can discover the supported customization surfaces.
+Install instructions, agents, skills, prompts, hooks, and schemas into `~/.copilot/` for the current user, ship the Rust semantic indexer payload for local AST exploration, and update VS Code user settings so every workspace can discover the supported customization surfaces. The default provider remains Copilot for backward compatibility.
 
-> **Note:** The user-level installer targets VS Code Copilot only. `.codex/` is not installed to `~/.copilot/` because Codex CLI reads its runtime assets from each project. Use the project setup command to distribute `.codex/`, create the project-local `.agents/skills/` bridge, and create the `.codex/skills/` compatibility alias in your projects. This installer does not manage `~/.codex/skills`, so warnings about invalid `SKILL.md` files there come from your Codex home state, not this package.
+The same user-level installer can now opt into Codex global assets with `--provider codex` or install both lanes with `--provider all`. Codex assets are namespaced under `~/.codex/everything-githubcopilot/` and `~/.codex/skills/everything-githubcopilot/`; active `~/.codex/config.toml`, `~/.codex/hooks.json`, and `~/.codex/rules/everything-githubcopilot-security.rules` are created only when safe. Existing Codex config or hook files are left untouched, with the managed templates available in the namespace.
 
 The installer now syncs the shipped VS Code discovery baseline for user settings: `~/.copilot` instructions, agents, skills, prompts, and hooks are enabled, `AGENTS.md` discovery is enabled, `CLAUDE.md` discovery stays disabled, and legacy `.claude` instruction / hook locations are explicitly turned off.
 
@@ -121,6 +121,8 @@ The installer now syncs the shipped VS Code discovery baseline for user settings
 
 ```bash
 npm run install:user
+npm run install:user:codex
+npm run install:user:all
 npm run uninstall:user
 npm run reinstall:user
 ```
@@ -129,6 +131,8 @@ You can also run the packaged CLI directly:
 
 ```bash
 npx everything-githubcopilot install
+npx everything-githubcopilot install --provider codex
+npx everything-githubcopilot install --provider all
 npx everything-githubcopilot uninstall
 npx everything-githubcopilot reinstall
 ```
@@ -137,6 +141,8 @@ npx everything-githubcopilot reinstall
 
 ```powershell
 .\scripts\setup-system.ps1
+.\scripts\setup-system.ps1 -Provider codex
+.\scripts\setup-system.ps1 -Provider all
 .\scripts\setup-system.ps1 -Action reinstall
 .\scripts\cleanup-system.ps1
 ```
@@ -145,11 +151,15 @@ npx everything-githubcopilot reinstall
 
 ```bash
 ./scripts/setup-system.sh install
+./scripts/setup-system.sh install codex
+./scripts/setup-system.sh install all
 ./scripts/setup-system.sh reinstall
 ./scripts/cleanup-system.sh
 ```
 
 The installer stores the previous VS Code user settings content so uninstall can restore it exactly. If `~/.copilot/` already contains unmanaged files and no installer state file, installation stops instead of overwriting them.
+
+Codex uninstall uses a separate `~/.codex/.everything-githubcopilot-codex-install.json` state file and removes only managed paths. Use `everything-githubcopilot uninstall --provider codex`, `.\scripts\cleanup-system.ps1 -Provider codex`, or `./scripts/cleanup-system.sh codex` to remove the Codex lane.
 
 The installer intentionally does not invent unsupported Autopilot, default-approval, or allowed-tool settings. The only approval-adjacent user setting it can opt into is `github.copilot.chat.claudeAgent.allowDangerouslySkipPermissions`, and even that is enabled only when the install command is run with `EGCOPILOT_ENABLE_DANGEROUS_SKIP_PERMISSIONS=1`.
 
@@ -157,7 +167,8 @@ The installer intentionally does not invent unsupported Autopilot, default-appro
 
 ### 5. Use
 
-- **Codex-only launcher:** after project setup, run `node scripts/codex-flow.js "<task>"` in the target project to execute the external `plan -> implement -> review` lane and store the phase artifacts under `.github/sessions/codex-flow/`
+- **Codex-only launcher:** after project setup, run `node scripts/codex-flow.js "<task>"` in the target project to execute the default external `plan -> implement -> review` lane and store the phase artifacts under `.github/sessions/codex-flow/`
+- **Codex workflows:** use `node scripts/codex-flow.js --workflow bugfix "<task>"`, `--workflow refactor`, or `--workflow review` for task-specific phase routing
 - **Codex incremental follow-up:** use `node scripts/codex-flow.js --resume-latest` to continue the first incomplete phase of the latest run, or `node scripts/codex-flow.js --review-latest` to rerun only the review phase when the latest run has already completed plan and implement
 - **Prompts:** `/plan`, `/plan-and-implement`, `/architect`, `/tdd`, `/code-review`, `/review`, `/build-fix`, `/fix-test`, `/docs`, `/e2e`, `/refactor-clean`, `/research-plan`, `/checkpoint`, `/evolve`, `/learn`, `/verify`, `/knowledge-audit`
 - **Verification:** `/verify` reruns the repository verification loop on the current change set and reports regressions or remaining risks without changing files by default
@@ -177,7 +188,7 @@ The installer intentionally does not invent unsupported Autopilot, default-appro
 ### Optional MCP Integrations
 
 - **Documentation lookup:** Context7 or other documentation-oriented MCP servers can improve freshness for setup and API questions, but the repository works without them.
-- **Boundary:** Do not treat `.vscode/mcp.json`, hosted memory, or remote MCP tools as part of the required install path. Core prompts, agents, hooks, and validators must keep a local fallback.
+- **Boundary:** Do not treat `.vscode/mcp.json`, hosted memory, or remote MCP tools as part of the required install path. Core prompts, agents, hooks, validators, and the default Codex profile must keep a local fallback.
 
 ---
 
@@ -194,15 +205,15 @@ The installer intentionally does not invent unsupported Autopilot, default-appro
   workflows/                       # CI validation
 
 .codex/                            # Codex CLI compatibility surface
-  config.toml                      # Codex reference configuration
+  config.toml                      # Local-first Codex reference configuration
   AGENTS.md                        # Codex compatibility notes
   agents/                          # Codex multi-agent role configs
-  hooks.json                       # Codex-compatible hooks
+  hooks.json                       # Codex-compatible Bash and apply_patch hooks
   rules/                           # Codex execution policy rules
 
 .agents/skills/                    # Project-local Codex skill bridge created by setup
 
-scripts/codex-flow.js              # Project-local Codex-only external orchestrator
+scripts/codex-flow.js              # Project-local Codex-only workflow orchestrator
 
 .vscode/
   settings.json                    # VS Code workspace settings

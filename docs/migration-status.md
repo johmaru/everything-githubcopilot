@@ -46,12 +46,13 @@ planner, coder, researcher, supporter
 
 ### User-level installer
 
-- `scripts/installer/cli.js` provides `install`, `uninstall`, and `reinstall` commands for `~/.copilot/`
-- `scripts/setup-system.ps1` and `scripts/setup-system.sh` wrap the shared installer for user-level setup
-- `scripts/cleanup-system.ps1` and `scripts/cleanup-system.sh` wrap the shared uninstall flow
+- `scripts/installer/cli.js` provides `install`, `uninstall`, and `reinstall` commands with `--provider copilot|codex|all`; the default provider remains Copilot
+- `scripts/setup-system.ps1` and `scripts/setup-system.sh` wrap the shared installer for user-level setup and accept the same provider lane
+- `scripts/cleanup-system.ps1` and `scripts/cleanup-system.sh` wrap the shared uninstall flow and accept the same provider lane
 - Installer state tracks the previous VS Code user settings content so uninstall can restore it exactly
 - Install refuses to overwrite a pre-existing unmanaged `~/.copilot/` directory without installer state
 - User-level setup now syncs the repo baseline for instructions, agents, skills, prompts, hooks, `AGENTS.md`, and legacy `.claude` discovery toggles
+- Codex user-level setup installs namespaced payloads under `~/.codex/everything-githubcopilot/` and `~/.codex/skills/everything-githubcopilot/`, creates active `config.toml`, `hooks.json`, and `rules/everything-githubcopilot-security.rules` only when unmanaged files are not already present, and tracks its own state in `~/.codex/.everything-githubcopilot-codex-install.json`
 
 ### Project-level installer
 
@@ -69,17 +70,19 @@ planner, coder, researcher, supporter
 ### Codex CLI compatibility surface
 
 - Root `AGENTS.md` — Codex project instruction source; `.codex/AGENTS.md` is compatibility guidance, not the source-of-truth instruction file
-- `.codex/config.toml` — runtime config with 24 agents, MCP servers, profiles, `codex_hooks = true`
+- `.codex/config.toml` — local-first runtime config with 24 agents, `minimal` / `full` profiles, optional MCP examples, `codex_hooks = true`
 - `.codex/agents/` — 24 TOML agent definitions (4 core + 17 specialist + 3 legacy)
-- `.codex/hooks.json` — Codex-compatible hooks (SessionStart, PreToolUse, PostToolUse, Stop)
+- `.codex/hooks.json` — Codex-compatible hooks (SessionStart, Bash Pre/PostToolUse, apply_patch Pre/PostToolUse, Stop)
 - `.codex/rules/security.rules` — Starlark execution policy carrying the Codex-facing enforcement subset; this repository does not ship runtime `.codex/instructions/`
 - `.codex/AGENTS.md` — Codex compatibility notes for hooks, rules, and agents
 - `.agents/skills/` — project-local bridge from `.github/skills/` for Codex skill auto-discovery; setup creates a junction when possible and a copied fallback otherwise
 - `.codex/skills/` — project-local compatibility alias that mirrors the canonical `.agents/skills/` bridge for direct path consumers
 - `.github/prompts/` remains the canonical workflow authoring surface; this repository does not ship runtime `.codex/prompts/`
-- Custom Codex agents are packaged as compatibility assets, but the repository does not treat interactive picker/runtime behavior as a guaranteed contract across Codex builds; stable orchestration remains Copilot-first or external-control-plane-first.
+- Custom Codex agents are packaged as compatibility assets, but the repository does not treat interactive picker/runtime behavior as a guaranteed contract across Codex builds; stable orchestration remains Copilot-first or external-control-plane-first through `scripts/codex/codex-flow.js`.
 - Current validators verify the Codex compatibility surface and instruction boundaries, not whether a particular Codex build exposes custom agents through a stable picker UX.
 - `scripts/hooks/codex-pre-tool-use.js` — PreToolUse hook blocking `--no-verify`
+- `scripts/hooks/_shared.js` — provider-aware hook payload normalization for Copilot edit payloads and Codex `apply_patch` patch bodies
+- `scripts/codex/codex-flow.js` — source launcher for the project-local `scripts/codex-flow.js` workflow engine (`default`, `bugfix`, `refactor`, `review`)
 - Project setup (`scripts/installer/project-setup.js`) copies `.codex/` into target projects, installs the `.agents/skills/` bridge, and creates the `.codex/skills/` compatibility alias
 
 ### Documentation

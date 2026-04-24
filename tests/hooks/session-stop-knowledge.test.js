@@ -130,6 +130,54 @@ results.push(test('extractObservationPatterns ignores unrelated reads after stat
   assert.ok(!patterns.some((pattern) => pattern.content.includes('static usage search')));
 }));
 
+results.push(test('extractObservationPatterns suppresses low-information repeated shell sequences', () => {
+  const patterns = knowledge.extractObservationPatterns([
+    { tool_name: 'Bash', tool_input: '{"command":"pwd"}', tool_output: 'completed' },
+    { tool_name: 'Bash', tool_input: '{"command":"ls"}', tool_output: 'completed' },
+    { tool_name: 'Bash', tool_input: '{"command":"git status"}', tool_output: 'completed' },
+    { tool_name: 'Bash', tool_input: '{"command":"npm test"}', tool_output: 'completed' },
+    { tool_name: 'Bash', tool_input: '{"command":"git diff"}', tool_output: 'completed' },
+  ]);
+
+  assert.ok(!patterns.some((pattern) => pattern.content.includes('Bash -> Bash')));
+}));
+
+results.push(test('extractObservationPatterns emits actionable metadata for error resolutions', () => {
+  const patterns = knowledge.extractObservationPatterns([
+    {
+      tool_name: 'Bash',
+      tool_input: '{"command":"npm test"}',
+      tool_output: 'Error: Cannot find module sqlite-vec',
+    },
+    {
+      tool_name: 'Bash',
+      tool_input: '{"command":"npm install sqlite-vec"}',
+      tool_output: 'completed successfully',
+    },
+    {
+      tool_name: 'read_file',
+      tool_input: '{"filePath":"package.json"}',
+      tool_output: '{}',
+    },
+    {
+      tool_name: 'Bash',
+      tool_input: '{"command":"npm test"}',
+      tool_output: 'ok',
+    },
+    {
+      tool_name: 'Bash',
+      tool_input: '{"command":"npm run validate"}',
+      tool_output: 'ok',
+    },
+  ]);
+
+  const resolution = patterns.find((pattern) => pattern.kind === 'error_resolution');
+  assert.ok(resolution, 'expected an error resolution pattern');
+  assert.strictEqual(resolution.domain, 'debugging');
+  assert.ok(resolution.trigger.includes('Cannot find module'));
+  assert.ok(resolution.action.includes('npm install sqlite-vec'));
+}));
+
 const passed = results.filter(Boolean).length;
 const failed = results.length - passed;
 

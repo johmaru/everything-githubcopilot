@@ -67,7 +67,14 @@ const SCHEMA_SQL = `
     project_id TEXT,
     label TEXT,
     importance TEXT NOT NULL DEFAULT 'medium',
-    confidence REAL NOT NULL DEFAULT 0.5
+    confidence REAL NOT NULL DEFAULT 0.5,
+    embedded_at TEXT,
+    embedding_model TEXT,
+    last_seen_at TEXT,
+    hit_count INTEGER NOT NULL DEFAULT 1,
+    domain TEXT,
+    trigger TEXT,
+    action TEXT
   );
 
   CREATE TABLE IF NOT EXISTS knowledge_vec_map (
@@ -1288,6 +1295,9 @@ results.push(
       label: 'err',
       importance: 'high',
       confidence: 0.7,
+      domain: 'debugging',
+      trigger: 'when ENOENT appears',
+      action: 'check the resolved path first',
     });
 
     const row = handle.prepare('SELECT * FROM knowledge WHERE id = ?').get(id);
@@ -1296,6 +1306,10 @@ results.push(
     assert.strictEqual(row.label, 'err');
     assert.strictEqual(row.importance, 'high');
     assert.strictEqual(row.confidence, 0.7);
+    assert.strictEqual(row.domain, 'debugging');
+    assert.strictEqual(row.trigger, 'when ENOENT appears');
+    assert.strictEqual(row.action, 'check the resolved path first');
+    assert.strictEqual(row.hit_count, 1);
     handle.close();
   })
 );
@@ -1312,9 +1326,10 @@ results.push(
       createdAt: '2026-04-01T12:00:00Z',
     });
 
-    const row = handle.prepare('SELECT importance, confidence FROM knowledge WHERE id = ?').get(id);
+    const row = handle.prepare('SELECT importance, confidence, hit_count FROM knowledge WHERE id = ?').get(id);
     assert.strictEqual(row.importance, 'medium');
     assert.strictEqual(row.confidence, 0.5);
+    assert.strictEqual(row.hit_count, 1);
     handle.close();
   })
 );
@@ -1358,6 +1373,87 @@ results.push(
     assert.strictEqual(all[0].label, 'err');
     assert.strictEqual(all[0].importance, 'critical');
     assert.strictEqual(all[0].confidence, 0.3);
+    handle.close();
+  })
+);
+
+results.push(
+  test('getPendingKnowledgeEmbeddings returns only unembedded scoped entries', () => {
+    const handle = createPlainTestDb();
+
+    db.insertKnowledge(handle, {
+      source: 'auto', kind: 'workflow', content: 'Embed me',
+      createdAt: '2026-04-01T15:00:00Z', projectId: 'projAAA', confidence: 0.7,
+    });
+    db.insertKnowledge(handle, {
+      source: 'auto', kind: 'workflow', content: 'Already embedded',
+      createdAt: '2026-04-01T15:01:00Z', projectId: 'projAAA', confidence: 0.8,
+      embeddedAt: '2026-04-01T15:02:00Z', embeddingModel: 'test-model',
+    });
+    db.insertKnowledge(handle, {
+      source: 'auto', kind: 'workflow', content: 'Other project',
+      createdAt: '2026-04-01T15:03:00Z', projectId: 'projBBB', confidence: 0.9,
+    });
+
+    const pending = db.getPendingKnowledgeEmbeddings(handle, { projectId: 'projAAA', limit: 10 });
+    assert.strictEqual(pending.length, 1);
+    assert.strictEqual(pending[0].content, 'Embed me');
+    handle.close();
+  })
+);
+
+results.push(
+  test('markKnowledgeEmbedded stores vector metadata and mapping', () => {
+    const { handle, vecLoaded } = createTestDb({ withVec: true });
+
+    if (!vecLoaded) {
+      console.log('    (skipped: sqlite-vec not available)');
+      handle.close();
+      return true;
+    }
+
+    const id = db.insertKnowledge(handle, {
+      source: 'auto', kind: 'workflow', content: 'Vector-ready pattern',
+      createdAt: '2026-04-01T16:00:00Z', projectId: 'projAAA',
+    });
+    const embedding = new Float32Array(db.EMBEDDING_DIM).fill(0.25);
+    const embeddedAt = '2026-04-01T16:01:00Z';
+
+    const marked = db.markKnowledgeEmbedded(handle, {
+      knowledgeId: id,
+      embedding,
+      embeddedAt,
+      embeddingModel: 'test-embedding-model',
+    });
+
+    assert.strictEqual(marked, true);
+    const row = handle.prepare('SELECT embedded_at, embedding_model FROM knowledge WHERE id = ?').get(id);
+    assert.strictEqual(row.embedded_at, embeddedAt);
+    assert.strictEqual(row.embedding_model, 'test-embedding-model');
+    const mapRow = handle.prepare('SELECT vec_rowid FROM knowledge_vec_map WHERE knowledge_id = ?').get(id);
+    assert.ok(mapRow && mapRow.vec_rowid > 0, 'vector map should be stored');
+    handle.close();
+  })
+);
+
+results.push(
+  test('recordKnowledgeHit updates last_seen_at, hit_count, and confidence', () => {
+    const handle = createPlainTestDb();
+    const id = db.insertKnowledge(handle, {
+      source: 'auto', kind: 'workflow', content: 'Repeatable workflow',
+      createdAt: '2026-04-01T17:00:00Z', projectId: 'projAAA', confidence: 0.4,
+    });
+
+    db.recordKnowledgeHit(handle, {
+      knowledgeId: id,
+      seenAt: '2026-04-01T17:02:00Z',
+      confidenceDelta: 0.15,
+    });
+
+    const row = handle.prepare('SELECT hit_count, last_seen_at, confidence FROM knowledge WHERE id = ?').get(id);
+    assert.strictEqual(row.hit_count, 2);
+    assert.strictEqual(row.last_seen_at, '2026-04-01T17:02:00Z');
+    assert.ok(row.confidence > 0.54 && row.confidence < 0.56, 'confidence should increase by delta');
     handle.close();
   })
 );

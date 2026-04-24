@@ -5,11 +5,21 @@ const path = require('path');
 const crypto = require('crypto');
 const { execFileSync: defaultExecFileSync } = require('child_process');
 
-const PHASE_DEFINITIONS = [
-  { name: 'plan', profile: 'strict' },
-  { name: 'implement', profile: null },
-  { name: 'review', profile: 'strict' },
-];
+const PHASE_DEFINITIONS = new Map([
+  ['plan', { name: 'plan', profile: 'strict' }],
+  ['inspect', { name: 'inspect', profile: 'strict' }],
+  ['implement', { name: 'implement', profile: null }],
+  ['verify', { name: 'verify', profile: null }],
+  ['review', { name: 'review', profile: 'strict' }],
+  ['repair', { name: 'repair', profile: null }],
+]);
+
+const WORKFLOW_PRESETS = {
+  default: ['plan', 'implement', 'review'],
+  bugfix: ['inspect', 'implement', 'verify', 'repair', 'review'],
+  refactor: ['plan', 'inspect', 'implement', 'verify', 'review'],
+  review: ['inspect', 'review'],
+};
 
 const DEFAULT_ARTIFACT_ROOT = path.join('.github', 'sessions', 'codex-flow');
 const LATEST_RUN_FILE_NAME = 'latest-run.json';
@@ -50,6 +60,10 @@ function printUsage() {
   console.log([
     'Usage:',
     '  node scripts/codex-flow.js "task description"',
+    '  node scripts/codex-flow.js --workflow default "task description"',
+    '  node scripts/codex-flow.js --workflow bugfix "task description"',
+    '  node scripts/codex-flow.js --workflow refactor "task description"',
+    '  node scripts/codex-flow.js --workflow review "task description"',
     '  node scripts/codex-flow.js --resume-latest',
     '  node scripts/codex-flow.js --review-latest',
   ].join('\n'));
@@ -150,6 +164,29 @@ function validateRunId(runId) {
   return runId;
 }
 
+function normalizeWorkflowName(workflowName) {
+  const normalizedWorkflowName = typeof workflowName === 'string' && workflowName.trim()
+    ? workflowName.trim()
+    : 'default';
+
+  if (!Object.prototype.hasOwnProperty.call(WORKFLOW_PRESETS, normalizedWorkflowName)) {
+    throw new Error(`unknown workflow: ${normalizedWorkflowName}`);
+  }
+
+  return normalizedWorkflowName;
+}
+
+function getWorkflowPhaseDefinitions(workflowName) {
+  return WORKFLOW_PRESETS[normalizeWorkflowName(workflowName)].map((phaseName) => {
+    const phaseDefinition = PHASE_DEFINITIONS.get(phaseName);
+    if (!phaseDefinition) {
+      throw new Error(`workflow references unknown phase: ${phaseName}`);
+    }
+
+    return phaseDefinition;
+  });
+}
+
 function resolveArtifactBaseDir(cwd, artifactRoot) {
   const artifactBaseDir = ensurePathInsideProjectRoot(
     cwd,
@@ -167,7 +204,8 @@ function buildRunContext(taskDescription, options = {}) {
   const artifactBaseDir = resolveArtifactBaseDir(cwd, options.artifactRoot);
   const runId = validateRunId(options.runId || generateRunId(options.now || new Date()));
   const runRoot = path.join(artifactBaseDir, runId);
-  const phases = PHASE_DEFINITIONS.map((phaseDefinition) => {
+  const workflow = normalizeWorkflowName(options.workflow);
+  const phases = getWorkflowPhaseDefinitions(workflow).map((phaseDefinition) => {
     const phaseDir = path.join(runRoot, phaseDefinition.name);
 
     return {
@@ -190,6 +228,7 @@ function buildRunContext(taskDescription, options = {}) {
     runRoot,
     runFile: path.join(runRoot, 'run.json'),
     taskDescription,
+    workflow,
     createdAt: options.now instanceof Date
       ? options.now.toISOString()
       : typeof options.now === 'string'
@@ -291,6 +330,7 @@ function writeRunMetadata(runContext) {
   const metadata = {
     runId: runContext.runId,
     taskDescription: runContext.taskDescription,
+    workflow: runContext.workflow,
     createdAt: runContext.createdAt,
     runRoot: artifactRelativePath(runContext, runContext.runRoot),
     phases: runContext.phases.map((phase) => ({
@@ -311,14 +351,32 @@ function writeRunMetadata(runContext) {
 }
 
 function buildPhasePrompt(phase, runContext) {
+  const previousOutputs = runContext.phases
+    .filter((candidate) => candidate !== phase)
+    .filter((candidate) => candidate.status === 'completed' || candidate.name !== phase.name)
+    .filter((candidate) => runContext.phases.indexOf(candidate) < runContext.phases.indexOf(phase))
+    .map((candidate) => `- ${candidate.name} output: ${artifactRelativePath(runContext, candidate.stdoutFile)}`);
+
   if (phase.name === 'plan') {
     return [
       'You are planning a Codex-only implementation workflow.',
       '',
       `Task: ${runContext.taskDescription}`,
+      `Workflow: ${runContext.workflow}`,
       'Constraints:',
       '- Do not modify files in this phase.',
       '- Produce a concise implementation plan with risks and focused verification steps.',
+    ].join('\n');
+  }
+
+  if (phase.name === 'inspect') {
+    return [
+      'You are inspecting the current workspace before a Codex workflow continues.',
+      '',
+      `Task: ${runContext.taskDescription}`,
+      `Workflow: ${runContext.workflow}`,
+      '- Do not modify files in this phase.',
+      '- Identify the relevant files, current behavior, risks, and focused verification path.',
     ].join('\n');
   }
 
@@ -327,24 +385,57 @@ function buildPhasePrompt(phase, runContext) {
       'You are implementing a task from a prior plan.',
       '',
       `Task: ${runContext.taskDescription}`,
+      `Workflow: ${runContext.workflow}`,
       `Read the phase handoff first: ${artifactRelativePath(runContext, phase.handoffFile)}`,
-      `Read the plan output first: ${artifactRelativePath(runContext, runContext.phases[0].stdoutFile)}`,
+      ...previousOutputs,
       '- Implement the necessary changes in the current workspace.',
       '- Run focused verification before finishing.',
       '- Output a concise implementation summary.',
     ].join('\n');
   }
 
-  return [
-    'You are reviewing a completed Codex implementation.',
-    '',
-    `Task: ${runContext.taskDescription}`,
-    `Read the phase handoff first: ${artifactRelativePath(runContext, phase.handoffFile)}`,
-    `Plan output: ${artifactRelativePath(runContext, runContext.phases[0].stdoutFile)}`,
-    `Implementation summary: ${artifactRelativePath(runContext, runContext.phases[1].stdoutFile)}`,
-    '- Review for correctness, regression risk, and missing tests.',
-    '- Output findings first, then a short closeout summary.',
-  ].join('\n');
+  if (phase.name === 'verify') {
+    return [
+      'You are verifying a completed Codex implementation.',
+      '',
+      `Task: ${runContext.taskDescription}`,
+      `Workflow: ${runContext.workflow}`,
+      `Read the phase handoff first: ${artifactRelativePath(runContext, phase.handoffFile)}`,
+      ...previousOutputs,
+      '- Run focused validation and tests for the changed behavior.',
+      '- Do not broaden scope beyond verification unless a trivial fix is required to make the intended change work.',
+      '- Output commands run, results, and any remaining failures.',
+    ].join('\n');
+  }
+
+  if (phase.name === 'repair') {
+    return [
+      'You are repairing issues found during Codex verification.',
+      '',
+      `Task: ${runContext.taskDescription}`,
+      `Workflow: ${runContext.workflow}`,
+      `Read the phase handoff first: ${artifactRelativePath(runContext, phase.handoffFile)}`,
+      ...previousOutputs,
+      '- Make only targeted fixes for verification findings.',
+      '- Re-run the focused checks affected by the repair.',
+      '- Output a concise repair summary.',
+    ].join('\n');
+  }
+
+  if (phase.name === 'review') {
+    return [
+      'You are reviewing a completed Codex workflow.',
+      '',
+      `Task: ${runContext.taskDescription}`,
+      `Workflow: ${runContext.workflow}`,
+      `Read the phase handoff first: ${artifactRelativePath(runContext, phase.handoffFile)}`,
+      ...previousOutputs,
+      '- Review for correctness, regression risk, and missing tests.',
+      '- Output findings first, then a short closeout summary.',
+    ].join('\n');
+  }
+
+  throw new Error(`unknown phase: ${phase.name}`);
 }
 
 function buildPhaseHandoff(phase, runContext) {
@@ -358,12 +449,17 @@ function buildPhaseHandoff(phase, runContext) {
     'Artifacts:',
   ];
 
+  for (const previousPhase of runContext.phases.slice(0, runContext.phases.indexOf(phase))) {
+    lines.push(`- ${previousPhase.name} output: ${artifactRelativePath(runContext, previousPhase.stdoutFile)}`);
+  }
+
   if (phase.name === 'implement') {
-    lines.push(`- Plan output: ${artifactRelativePath(runContext, runContext.phases[0].stdoutFile)}`);
-    lines.push('- Goal: implement the planned changes and write a concise summary.');
+    lines.push('- Goal: implement the planned or inspected changes and write a concise summary.');
+  } else if (phase.name === 'verify') {
+    lines.push('- Goal: run focused validation and report exact results.');
+  } else if (phase.name === 'repair') {
+    lines.push('- Goal: repair only issues discovered by verification.');
   } else if (phase.name === 'review') {
-    lines.push(`- Plan output: ${artifactRelativePath(runContext, runContext.phases[0].stdoutFile)}`);
-    lines.push(`- Implementation summary: ${artifactRelativePath(runContext, runContext.phases[1].stdoutFile)}`);
     lines.push('- Goal: review the current workspace, findings first.');
   }
 
@@ -760,6 +856,9 @@ function readLatestRunState(options = {}) {
 }
 
 function hydrateRunContext(runContext, runMetadata) {
+  runContext.workflow = typeof runMetadata.workflow === 'string' && runMetadata.workflow
+    ? normalizeWorkflowName(runMetadata.workflow)
+    : runContext.workflow;
   runContext.createdAt = typeof runMetadata.createdAt === 'string' && runMetadata.createdAt
     ? runMetadata.createdAt
     : runContext.createdAt;
@@ -788,6 +887,7 @@ function buildFlowResult(runContext, reviewOutput = '') {
   return {
     runId: runContext.runId,
     runRoot: runContext.runRoot,
+    workflow: runContext.workflow,
     reviewOutput,
     phases: runContext.phases.map((phase) => ({
       name: phase.name,
@@ -808,6 +908,7 @@ function resumeLatestRun(options = {}) {
       artifactRoot: latestRunState.artifactBaseDir,
       runId: latestRunState.latestRunId,
       now: latestRunState.runMetadata.createdAt,
+      workflow: latestRunState.runMetadata.workflow || 'default',
     }),
     latestRunState.runMetadata
   );
@@ -842,17 +943,23 @@ function reviewLatestRun(options = {}) {
       artifactRoot: latestRunState.artifactBaseDir,
       runId: latestRunState.latestRunId,
       now: latestRunState.runMetadata.createdAt,
+      workflow: latestRunState.runMetadata.workflow || 'default',
     }),
     latestRunState.runMetadata
   );
   const lockState = acquireRunLock(runContext, 'review-latest');
 
   try {
-    if (runContext.phases[0].status !== 'completed' || runContext.phases[1].status !== 'completed') {
+    const reviewPhaseIndex = runContext.phases.findIndex((phase) => phase.name === 'review');
+    if (reviewPhaseIndex === -1) {
+      throw new Error('latest run has no review phase');
+    }
+
+    if (runContext.phases.slice(0, reviewPhaseIndex).some((phase) => phase.status !== 'completed')) {
       throw new Error('latest run is not ready for review');
     }
 
-    const reviewPhase = runContext.phases[2];
+    const reviewPhase = runContext.phases[reviewPhaseIndex];
     reviewPhase.status = 'pending';
     reviewPhase.errorMessage = null;
     const reviewOutput = runPhase(runContext, reviewPhase, options);
@@ -865,9 +972,10 @@ function reviewLatestRun(options = {}) {
 
 function parseCliArgs(argv = process.argv) {
   const args = argv.slice(2);
+  let workflow = 'default';
 
   if (args[0] === '--help' || args[0] === '-h') {
-    return { mode: 'help', taskDescription: '' };
+    return { mode: 'help', taskDescription: '', workflow };
   }
 
   if (args[0] === '--resume-latest') {
@@ -875,7 +983,7 @@ function parseCliArgs(argv = process.argv) {
       throw new Error('--resume-latest does not accept a task description');
     }
 
-    return { mode: 'resume-latest', taskDescription: '' };
+    return { mode: 'resume-latest', taskDescription: '', workflow };
   }
 
   if (args[0] === '--review-latest') {
@@ -883,7 +991,16 @@ function parseCliArgs(argv = process.argv) {
       throw new Error('--review-latest does not accept a task description');
     }
 
-    return { mode: 'review-latest', taskDescription: '' };
+    return { mode: 'review-latest', taskDescription: '', workflow };
+  }
+
+  if (args[0] === '--workflow') {
+    if (!args[1] || args[1].startsWith('-')) {
+      throw new Error('--workflow requires a workflow name');
+    }
+
+    workflow = normalizeWorkflowName(args[1]);
+    args.splice(0, 2);
   }
 
   if (typeof args[0] === 'string' && args[0].startsWith('-')) {
@@ -898,6 +1015,7 @@ function parseCliArgs(argv = process.argv) {
   return {
     mode: 'run',
     taskDescription: args.join(' ').trim(),
+    workflow,
   };
 }
 
@@ -959,7 +1077,7 @@ function main(argv = process.argv, options = {}) {
       ? resumeLatestRun(options)
       : parsedArgs.mode === 'review-latest'
         ? reviewLatestRun(options)
-        : runFlow(parsedArgs.taskDescription, options);
+        : runFlow(parsedArgs.taskDescription, { ...options, workflow: parsedArgs.workflow });
     console.log(`Codex flow complete: ${result.runRoot}`);
 
     if (result.reviewOutput) {
@@ -982,7 +1100,9 @@ module.exports = {
   buildPhasePrompt,
   buildRunContext,
   generateRunId,
+  getWorkflowPhaseDefinitions,
   main,
+  normalizeWorkflowName,
   parseCliArgs,
   printUsage,
   readLatestRunState,

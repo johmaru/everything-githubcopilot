@@ -16,6 +16,17 @@
     ],
     "PreToolUse": [
       {
+        "matcher": "apply_patch|Write|Edit",
+        "description": "Block edits to formatter and linter config files instead of weakening validation rules.",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node -e \"var fs=require('fs'),path=require('path');var dir=process.cwd();var rel='scripts/hooks/config-protection.js';for(;;){var candidate=path.join(dir,rel);var hasMarkers=fs.existsSync(path.join(dir,'AGENTS.md'))&&fs.existsSync(path.join(dir,'.codex','hooks.json'));if(hasMarkers){if(fs.existsSync(candidate)){process.chdir(dir);require(candidate)}else{process.exit(0)}break;}var parent=path.dirname(dir);if(parent===dir){process.exit(0)}dir=parent}\"",
+            "timeout": 5
+          }
+        ]
+      },
+      {
         "matcher": "^git(\\s|$)",
         "description": "Block git hook-bypass flags (--no-verify).",
         "hooks": [
@@ -40,8 +51,54 @@
     ],
     "PostToolUse": [
       {
+        "matcher": "apply_patch|Write|Edit",
+        "description": "Run lightweight quality-gate checks after Codex apply_patch edits.",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node -e \"var fs=require('fs'),path=require('path');var dir=process.cwd();var rel='scripts/hooks/quality-gate.js';for(;;){var candidate=path.join(dir,rel);var hasMarkers=fs.existsSync(path.join(dir,'AGENTS.md'))&&fs.existsSync(path.join(dir,'.codex','hooks.json'));if(hasMarkers){if(fs.existsSync(candidate)){process.chdir(dir);require(candidate)}else{process.exit(0)}break;}var parent=path.dirname(dir);if(parent===dir){process.exit(0)}dir=parent}\"",
+            "async": true,
+            "timeout": 30
+          }
+        ]
+      },
+      {
+        "matcher": "apply_patch|Write|Edit",
+        "description": "Auto-format JS and TS files after Codex apply_patch edits.",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node -e \"var fs=require('fs'),path=require('path');var dir=process.cwd();var rel='scripts/hooks/post-edit-format.js';for(;;){var candidate=path.join(dir,rel);var hasMarkers=fs.existsSync(path.join(dir,'AGENTS.md'))&&fs.existsSync(path.join(dir,'.codex','hooks.json'));if(hasMarkers){if(fs.existsSync(candidate)){process.chdir(dir);require(candidate)}else{process.exit(0)}break;}var parent=path.dirname(dir);if(parent===dir){process.exit(0)}dir=parent}\"",
+            "timeout": 30
+          }
+        ]
+      },
+      {
+        "matcher": "apply_patch|Write|Edit",
+        "description": "Queue a targeted TypeScript check after Codex apply_patch edits.",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node -e \"var fs=require('fs'),path=require('path');var dir=process.cwd();var rel='scripts/hooks/post-edit-typecheck.js';for(;;){var candidate=path.join(dir,rel);var hasMarkers=fs.existsSync(path.join(dir,'AGENTS.md'))&&fs.existsSync(path.join(dir,'.codex','hooks.json'));if(hasMarkers){if(fs.existsSync(candidate)){process.chdir(dir);require(candidate)}else{process.exit(0)}break;}var parent=path.dirname(dir);if(parent===dir){process.exit(0)}dir=parent}\"",
+            "async": true,
+            "timeout": 30
+          }
+        ]
+      },
+      {
+        "matcher": "apply_patch|Write|Edit",
+        "description": "Warn when Codex-edited JS or TS files still contain console.log statements.",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node -e \"var fs=require('fs'),path=require('path');var dir=process.cwd();var rel='scripts/hooks/post-edit-console-warn.js';for(;;){var candidate=path.join(dir,rel);var hasMarkers=fs.existsSync(path.join(dir,'AGENTS.md'))&&fs.existsSync(path.join(dir,'.codex','hooks.json'));if(hasMarkers){if(fs.existsSync(candidate)){process.chdir(dir);require(candidate)}else{process.exit(0)}break;}var parent=path.dirname(dir);if(parent===dir){process.exit(0)}dir=parent}\"",
+            "timeout": 30
+          }
+        ]
+      },
+      {
         "matcher": ".*",
-        "description": "Record tool usage observations for knowledge extraction (Bash commands only in Codex).",
+        "description": "Record tool usage observations for knowledge extraction.",
         "hooks": [
           {
             "type": "command",
@@ -69,10 +126,11 @@
       "PostToolUseFailure — not a Codex event. Tool-call-correction runs only in VS Code Copilot.",
       "PreCompact — not a Codex event. Pre-compact runs only in VS Code Copilot."
     ],
-    "bash_only_limitation": [
-      "PreToolUse/PostToolUse only fire for Bash tool calls in Codex CLI.",
-      "Write/Edit/MultiEdit hooks (doc-file-warning, config-protection, quality-gate, post-edit-format, post-edit-typecheck, post-edit-console-warn) cannot run in Codex.",
-      "Use AGENTS.md instructions and security.rules to enforce these policies instead."
+    "edit_hook_contract": [
+      "Codex apply_patch emits PreToolUse/PostToolUse in builds that include openai/codex PR #18391.",
+      "The canonical hook payload tool_name remains apply_patch; Write and Edit are matcher aliases.",
+      "MultiEdit is not a Codex apply_patch alias and is intentionally unsupported here.",
+      "Bash commands still use the Bash hook name; file-level policy for shell-written files remains best-effort."
     ]
   }
 }

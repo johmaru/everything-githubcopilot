@@ -176,6 +176,9 @@ function extractKnowledgeFromObservations(handle, sid, pid) {
       sessionId: sid,
       projectId: pid,
       confidence: p.confidence,
+      domain: p.domain,
+      trigger: p.trigger,
+      action: p.action,
       embedding: null, // embedding done async in learn-embed.js if desired
     });
   }
