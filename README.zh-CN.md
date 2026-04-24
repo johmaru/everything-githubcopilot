@@ -123,6 +123,37 @@ npx everything-githubcopilot reinstall
 
 ---
 
+## 使用
+
+- **Codex-only launcher:** project setup 后，在目标项目中运行 `node scripts/codex-flow.js "<task>"`，会执行默认的外部 `plan -> implement -> review` lane，并把 phase artifacts 写入 `.github/sessions/codex-flow/`。
+- **Codex workflows:** 使用 `node scripts/codex-flow.js --workflow bugfix "<task>"`、`--workflow refactor` 或 `--workflow review` 来选择面向任务的 phase routing。
+- **Codex incremental follow-up:** `node scripts/codex-flow.js --resume-latest` 会从最新 run 的第一个未完成 phase 继续，`node scripts/codex-flow.js --review-latest` 只重跑已经完成 plan / implement 的最新 run 的 review phase。
+- **Prompts:** `/plan`, `/plan-and-implement`, `/architect`, `/tdd`, `/code-review`, `/review`, `/build-fix`, `/fix-test`, `/docs`, `/e2e`, `/refactor-clean`, `/research-plan`, `/checkpoint`, `/evolve`, `/learn`, `/verify`, `/knowledge-audit`
+- **Verification:** `/verify` 会对当前变更集重新运行 repository verification loop，默认只报告 regression 和剩余风险，不修改文件。
+- **Knowledge audit:** `/knowledge-audit` 会检查 instructions、skills、prompts、agents 是否存在过期、矛盾、重复或覆盖缺口。
+- **Language reviews:** `/typescript-review`, `/python-review`, `/go-review`
+- **Static AST exploration:** `npm run entry-points:index -- --root .`, `npm run entry-points:query -- --root . --query "semantic indexer"`, `npm run rust:index -- --root . --format summary`, `npm run rust:index -- --root . --file rust/semantic-indexer/src/cli.rs` 可用于 repo-wide indexing、ranked entry-point lookup、semantic-indexer summary 和 file-level symbol inventory。
+- **User-visible agents:** `planner`, `coder`, `researcher`, `supporter` 可直接用于 planning、implementation、deep investigation 和不编辑文件的 safer support。
+- **Internal specialists:** `architect`, `tdd-guide`, `code-reviewer`, `security-reviewer`, `build-error-resolver`, `docs-lookup`, `e2e-runner`, `refactor-cleaner`, `best-practice-researcher`, `typescript-reviewer`, `python-reviewer`, `go-reviewer`, `agent-auditor`, `code-structure-auditor`, `design-coherence-auditor`, `knowledge-curator`, `safety-checker` 由 core agents 或 prompts 显式调用。
+
+## Memory Surface
+
+- **Session resume artifacts:** `/checkpoint` 写入 `.github/sessions/checkpoint.md`，`PreCompact` 写入 `.github/sessions/compact-snapshot.md`，`SessionStart` 会先恢复这些 artifacts，再恢复 prior summaries。
+- **Copilot/Codex shared continuity:** `.github/hooks/deterministic-hooks.json` 中的 Copilot hooks 和 `.codex/hooks.json` 中的 Codex hooks 调用同一个 `scripts/hooks/*.js` memory layer，因此两个 provider 会保存和恢复同一个 local store。
+- **SQLite-backed continuity:** `scripts/hooks/db.js` 将 sessions、pending tasks、observations、project-scoped knowledge 持久化到 `.github/sessions/copilot.db`，下一次 session 可以在不依赖 hosted memory service 的情况下恢复 active work。
+- **Hybrid retrieval:** `SessionStart` 组合 keyword match、已经 embedded 的 knowledge、confidence、recency、hit count 和 project scope。启动时不会加载 embedding model。
+- **Durable learnings:** `/learn` 用来整理应该保留的知识及其归属。需要写入 sanitized、可搜索的 repo knowledge 时，使用 `node scripts/hooks/learn-embed.js`；不要把 secrets 或临时 scratch notes 放入这条路径。
+- **Embedding backfill:** session 结束后可运行 `node scripts/hooks/learn-embed.js --backfill --limit 25` 来异步 embedding pending knowledge。如果 `sqlite-vec` 不可用，系统会保留 row，并回退到 keyword retrieval。
+- **Noise control:** auto-observation 会抑制 `Bash -> Bash` 这类低信息量 shell-only sequence，并优先保存带 trigger/action metadata 的 error-resolution、workflow 和 hotspot knowledge。
+- **Scope boundary:** core workflow continuity 来自 shipped checkpoint、session 和 knowledge hooks。GitHub Copilot built-in memory 是可选项，不是此 repository 的必需依赖。
+
+## Optional MCP Integrations
+
+- **Documentation lookup:** Context7 或其他 documentation-oriented MCP server 可以提高 setup 和 API 问题的新鲜度，但本 repository 不依赖它们也能工作。
+- **Boundary:** 不要把 `.vscode/mcp.json`、hosted memory 或 remote MCP tools 视为 required install path。Core prompts、agents、hooks、validators 和默认 Codex profile 必须保留 local fallback。
+
+---
+
 ## 包含内容
 
 ```

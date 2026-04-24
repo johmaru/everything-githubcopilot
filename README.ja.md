@@ -135,6 +135,37 @@ installer は未公開の Autopilot 設定や default approvals、allowed tools 
 
 ---
 
+## 使い方
+
+- **Codex-only launcher:** project setup 後、target project で `node scripts/codex-flow.js "<task>"` を実行すると、default の外部 `plan -> implement -> review` lane を使い、phase artifact を `.github/sessions/codex-flow/` に保存します。
+- **Codex workflows:** `node scripts/codex-flow.js --workflow bugfix "<task>"`、`--workflow refactor`、`--workflow review` で task に合わせた phase routing を使えます。
+- **Codex incremental follow-up:** `node scripts/codex-flow.js --resume-latest` は最新 run の最初の未完了 phase から続行し、`node scripts/codex-flow.js --review-latest` は plan / implement 済みの最新 run の review phase だけを再実行します。
+- **Prompts:** `/plan`, `/plan-and-implement`, `/architect`, `/tdd`, `/code-review`, `/review`, `/build-fix`, `/fix-test`, `/docs`, `/e2e`, `/refactor-clean`, `/research-plan`, `/checkpoint`, `/evolve`, `/learn`, `/verify`, `/knowledge-audit`
+- **Verification:** `/verify` は現在の変更セットに対して repository verification loop を再実行し、既定ではファイルを変更せず regression や残リスクを報告します。
+- **Knowledge audit:** `/knowledge-audit` は instructions, skills, prompts, agents の stale / contradiction / duplication / coverage gap を確認します。
+- **Language reviews:** `/typescript-review`, `/python-review`, `/go-review`
+- **Static AST exploration:** `npm run entry-points:index -- --root .`, `npm run entry-points:query -- --root . --query "semantic indexer"`, `npm run rust:index -- --root . --format summary`, `npm run rust:index -- --root . --file rust/semantic-indexer/src/cli.rs` で repository 全体の indexing、ranked entry-point lookup、semantic-indexer summary、file-level symbol inventory を確認できます。
+- **User-visible agents:** `planner`, `coder`, `researcher`, `supporter` は planning、implementation、deep investigation、編集なしの safer support に直接使えます。
+- **Internal specialists:** `architect`, `tdd-guide`, `code-reviewer`, `security-reviewer`, `build-error-resolver`, `docs-lookup`, `e2e-runner`, `refactor-cleaner`, `best-practice-researcher`, `typescript-reviewer`, `python-reviewer`, `go-reviewer`, `agent-auditor`, `code-structure-auditor`, `design-coherence-auditor`, `knowledge-curator`, `safety-checker` は core agents や prompts から明示的に呼び出されます。
+
+## Memory Surface
+
+- **Session resume artifacts:** `/checkpoint` は `.github/sessions/checkpoint.md` を書き、`PreCompact` は `.github/sessions/compact-snapshot.md` を書きます。`SessionStart` は prior summaries より先にこれらの artifact を復元します。
+- **Copilot/Codex 共通の continuity:** `.github/hooks/deterministic-hooks.json` の Copilot hooks と `.codex/hooks.json` の Codex hooks は同じ `scripts/hooks/*.js` memory layer を呼ぶため、両 provider は同じ local store に保存・復元します。
+- **SQLite-backed continuity:** `scripts/hooks/db.js` は sessions, pending tasks, observations, project-scoped knowledge を `.github/sessions/copilot.db` に保存し、hosted memory service に依存せず次回 session で active work を復元します。
+- **Hybrid retrieval:** `SessionStart` は keyword match、既に embedding 済みの knowledge、confidence、recency、hit count、project scope を組み合わせます。起動時に embedding model はロードしません。
+- **Durable learnings:** `/learn` は保持すべき知識と保存先を整理します。sanitized で検索可能な repo knowledge にしたい場合は `node scripts/hooks/learn-embed.js` を使い、secret や一時 scratch note はこの経路に入れないでください。
+- **Embedding backfill:** session 終了後に `node scripts/hooks/learn-embed.js --backfill --limit 25` を実行すると pending knowledge を非同期に embedding 化できます。`sqlite-vec` が使えない場合も row は保持され、keyword retrieval にフォールバックします。
+- **Noise control:** auto-observation は `Bash -> Bash` のような低情報量の shell-only sequence を抑制し、trigger/action metadata を持つ error-resolution、workflow、hotspot knowledge を優先します。
+- **Scope boundary:** core workflow continuity は shipped checkpoint, session, knowledge hooks が担います。GitHub Copilot built-in memory の有効化は任意で、この repository の必須要件ではありません。
+
+## Optional MCP Integrations
+
+- **Documentation lookup:** Context7 など documentation-oriented MCP server は setup や API 質問の鮮度を上げられますが、この repository はそれらなしで動作します。
+- **Boundary:** `.vscode/mcp.json`、hosted memory、remote MCP tools を required install path として扱わないでください。Core prompts, agents, hooks, validators, default Codex profile は local fallback を維持します。
+
+---
+
 ## 同梱内容
 
 ```

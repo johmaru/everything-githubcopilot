@@ -181,8 +181,12 @@ The installer intentionally does not invent unsupported Autopilot, default-appro
 ### Memory Surface
 
 - **Session resume artifacts:** `/checkpoint` writes `.github/sessions/checkpoint.md`, `PreCompact` writes `.github/sessions/compact-snapshot.md`, and `SessionStart` restores those artifacts before prior summaries.
-- **SQLite-backed continuity:** `scripts/hooks/db.js` persists sessions, pending tasks, and project-scoped knowledge in `.github/sessions/copilot.db` so the next session can recover active work without relying on a hosted memory service.
-- **Durable learnings:** `/learn` curates what should be kept and where it belongs. Use `node scripts/hooks/learn-embed.js` when the result should become sanitized, searchable repo knowledge for future semantic retrieval, and keep secrets or transient scratch notes out of that path.
+- **Shared Copilot/Codex continuity:** Copilot hooks in `.github/hooks/deterministic-hooks.json` and Codex hooks in `.codex/hooks.json` call the same `scripts/hooks/*.js` memory layer, so both providers persist and restore from the same local store.
+- **SQLite-backed continuity:** `scripts/hooks/db.js` persists sessions, pending tasks, observations, and project-scoped knowledge in `.github/sessions/copilot.db` so the next session can recover active work without relying on a hosted memory service.
+- **Hybrid retrieval:** `SessionStart` combines cheap keyword matches, already-embedded knowledge, confidence, recency, hit count, and project scope. It does not load the embedding model on startup.
+- **Durable learnings:** `/learn` curates what should be kept and where it belongs. Use `node scripts/hooks/learn-embed.js` when the result should become sanitized, searchable repo knowledge for future retrieval, and keep secrets or transient scratch notes out of that path.
+- **Embedding backfill:** `node scripts/hooks/learn-embed.js --backfill --limit 25` embeds pending knowledge asynchronously after sessions finish. If `sqlite-vec` is unavailable, the system keeps the row and falls back to keyword retrieval.
+- **Noise control:** auto-observation suppresses low-information shell-only sequences such as repeated `Bash -> Bash` and prefers actionable error-resolution, workflow, and hotspot knowledge with trigger/action metadata.
 - **Scope boundary:** Core workflow continuity comes from the shipped checkpoint, session, and knowledge hooks. Enabling GitHub Copilot built-in memory is optional and not required for this repository.
 
 ### Optional MCP Integrations
